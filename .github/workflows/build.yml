@@ -1,0 +1,513 @@
+name: Build FaceLock APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Projekt erzeugen
+        run: |
+          mkdir -p app/src/main/java/com/example/facelock app/src/main/assets
+
+          cat > settings.gradle.kts <<'EOF'
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories { google(); mavenCentral() }
+          }
+          rootProject.name = "FaceLock"
+          include(":app")
+          EOF
+
+          cat > build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application") version "8.5.2" apply false
+              id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+          }
+          EOF
+
+          cat > gradle.properties <<'EOF'
+          android.useAndroidX=true
+          org.gradle.jvmargs=-Xmx3g
+          EOF
+
+          cat > app/build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+          android {
+              namespace = "com.example.facelock"
+              compileSdk = 34
+              defaultConfig {
+                  applicationId = "com.example.facelock"
+                  minSdk = 26
+                  targetSdk = 34
+                  versionCode = 1
+                  versionName = "1.0"
+              }
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+              kotlinOptions { jvmTarget = "17" }
+              androidResources { noCompress += "task" }
+          }
+          dependencies {
+              implementation("androidx.core:core-ktx:1.13.1")
+              implementation("androidx.activity:activity-ktx:1.9.1")
+              implementation("androidx.camera:camera-core:1.3.4")
+              implementation("androidx.camera:camera-camera2:1.3.4")
+              implementation("androidx.camera:camera-lifecycle:1.3.4")
+              implementation("androidx.camera:camera-view:1.3.4")
+              implementation("com.google.mediapipe:tasks-vision:0.10.14")
+              implementation("androidx.security:security-crypto:1.1.0-alpha06")
+          }
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.CAMERA" />
+              <uses-feature android:name="android.hardware.camera.front" android:required="false" />
+              <application
+                  android:label="FaceLock"
+                  android:allowBackup="false"
+                  android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:screenOrientation="portrait">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          cat > app/src/main/java/com/example/facelock/Face.kt <<'EOF'
+          package com.example.facelock
+
+          import android.util.Base64
+          import com.google.mediapipe.tasks.components.containers.NormalizedLandmark
+          import java.nio.ByteBuffer
+          import kotlin.math.abs
+          import kotlin.math.sqrt
+
+          class FaceData(val desc: FloatArray, val front: Float, val ear: Float)
+
+          object Face {
+              // Starre Gesichtspunkte: Kontur, Nase, Augenrahmen, Brauen, Wangen (kein Mund -> robust gegen Mimik)
+              private val IDX = intArrayOf(
+                  10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148,
+                  176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109,
+                  1, 2, 4, 5, 6, 19, 94, 97, 98, 168, 195, 197, 129, 358, 48, 278, 64, 294,
+                  33, 133, 159, 145, 263, 362, 386, 374,
+                  46, 53, 52, 65, 55, 70, 63, 105, 66, 107, 276, 283, 282, 295, 285, 300, 293, 334, 296, 336,
+                  50, 101, 117, 118, 119, 205, 187, 123, 280, 330, 346, 347, 348, 425, 411, 352
+              )
+
+              private fun sub(a: FloatArray, b: FloatArray) = floatArrayOf(a[0] - b[0], a[1] - b[1], a[2] - b[2])
+              private fun dot(a: FloatArray, b: FloatArray) = a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+              private fun len(a: FloatArray) = sqrt(dot(a, a))
+              private fun unit(a: FloatArray): FloatArray { val n = len(a); return floatArrayOf(a[0] / n, a[1] / n, a[2] / n) }
+              private fun cross(a: FloatArray, b: FloatArray) = floatArrayOf(
+                  a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]
+              )
+
+              fun dist(a: FloatArray, b: FloatArray): Float {
+                  var s = 0f
+                  for (i in a.indices) { val d = a[i] - b[i]; s += d * d }
+                  return sqrt(s / (a.size / 3))
+              }
+
+              fun avg(list: List<FloatArray>): FloatArray {
+                  val r = FloatArray(list[0].size)
+                  for (v in list) for (i in r.indices) r[i] += v[i] / list.size
+                  return r
+              }
+
+              fun encode(a: FloatArray): String {
+                  val bb = ByteBuffer.allocate(a.size * 4)
+                  for (f in a) bb.putFloat(f)
+                  return Base64.encodeToString(bb.array(), Base64.NO_WRAP)
+              }
+
+              fun decode(s: String): FloatArray {
+                  val bb = ByteBuffer.wrap(Base64.decode(s, Base64.NO_WRAP))
+                  return FloatArray(bb.remaining() / 4) { bb.getFloat() }
+              }
+
+              fun analyze(lm: List<NormalizedLandmark>, w: Float, h: Float): FaceData? {
+                  if (lm.size < 468) return null
+                  fun p(i: Int) = floatArrayOf(lm[i].x() * w, lm[i].y() * h, lm[i].z() * w)
+                  // Eigenes 3D-Koordinatensystem aus Augen- und Kinnachse -> unabhaengig von Kopfneigung/Abstand
+                  val xa = unit(sub(p(263), p(33)))
+                  val za = unit(cross(xa, sub(p(152), p(10))))
+                  val ya = cross(za, xa)
+                  val n = IDX.size
+                  val out = FloatArray(n * 3)
+                  for (k in 0 until n) {
+                      val q = p(IDX[k])
+                      out[3 * k] = dot(q, xa); out[3 * k + 1] = dot(q, ya); out[3 * k + 2] = dot(q, za)
+                  }
+                  val c = FloatArray(3)
+                  for (k in 0 until n) for (j in 0..2) c[j] += out[3 * k + j] / n
+                  var s = 0f
+                  for (k in 0 until n) for (j in 0..2) { out[3 * k + j] -= c[j]; s += out[3 * k + j] * out[3 * k + j] }
+                  val sc = sqrt(s / n)
+                  for (i in out.indices) out[i] /= sc
+                  fun d(i: Int, j: Int) = len(sub(p(i), p(j)))
+                  val l = (d(160, 144) + d(158, 153)) / (2 * d(33, 133))
+                  val r = (d(385, 380) + d(387, 373)) / (2 * d(362, 263))
+                  return FaceData(out, abs(za[2]), (l + r) / 2)
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/example/facelock/MainActivity.kt <<'EOF'
+          package com.example.facelock
+
+          import android.Manifest
+          import android.app.AlertDialog
+          import android.content.SharedPreferences
+          import android.content.pm.PackageManager
+          import android.graphics.Bitmap
+          import android.graphics.Color
+          import android.graphics.Matrix
+          import android.os.Bundle
+          import android.os.Handler
+          import android.os.Looper
+          import android.text.InputType
+          import android.util.Base64
+          import android.util.Size
+          import android.view.Gravity
+          import android.view.View
+          import android.view.ViewGroup
+          import android.view.WindowManager
+          import android.widget.Button
+          import android.widget.EditText
+          import android.widget.FrameLayout
+          import android.widget.LinearLayout
+          import android.widget.TextView
+          import android.widget.Toast
+          import androidx.activity.ComponentActivity
+          import androidx.activity.result.contract.ActivityResultContracts
+          import androidx.camera.core.CameraSelector
+          import androidx.camera.core.ImageAnalysis
+          import androidx.camera.core.ImageProxy
+          import androidx.camera.core.Preview
+          import androidx.camera.lifecycle.ProcessCameraProvider
+          import androidx.camera.view.PreviewView
+          import androidx.core.content.ContextCompat
+          import androidx.security.crypto.EncryptedSharedPreferences
+          import androidx.security.crypto.MasterKey
+          import com.google.mediapipe.framework.image.BitmapImageBuilder
+          import com.google.mediapipe.tasks.core.BaseOptions
+          import com.google.mediapipe.tasks.vision.core.RunningMode
+          import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarker
+          import java.security.SecureRandom
+          import java.util.concurrent.Executors
+          import javax.crypto.SecretKeyFactory
+          import javax.crypto.spec.PBEKeySpec
+
+          class MainActivity : ComponentActivity() {
+              private enum class Mode { NONE, ENROLL, VERIFY }
+
+              private val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
+              private val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
+              private val ENROLL_FRAMES = 30
+              private val VERIFY_FRAMES = 6
+
+              private lateinit var prefs: SharedPreferences
+              private lateinit var root: FrameLayout
+              private val handler = Handler(Looper.getMainLooper())
+              private val exec = Executors.newSingleThreadExecutor()
+              private var landmarker: FaceLandmarker? = null
+              private var provider: ProcessCameraProvider? = null
+              private var dlg: AlertDialog? = null
+              private var statusView: TextView? = null
+              @Volatile private var mode = Mode.NONE
+              private var unlocked = false
+              private var reenroll = false
+              private var permAsked = false
+              private val samples = ArrayList<FloatArray>()
+              private var blink = false
+              private var openSeen = false
+              private var closed = false
+              private var lastSample = 0L
+
+              private val permLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+                  permAsked = false
+                  if (ok) route() else { Toast.makeText(this, "Kamera-Berechtigung noetig", Toast.LENGTH_LONG).show(); finish() }
+              }
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
+                  val mk = MasterKey.Builder(this).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
+                  prefs = EncryptedSharedPreferences.create(
+                      this, "vault", mk,
+                      EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                      EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+                  )
+                  root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
+                  setContentView(root)
+                  val opts = FaceLandmarker.FaceLandmarkerOptions.builder()
+                      .setBaseOptions(BaseOptions.builder().setModelAssetPath("face_landmarker.task").build())
+                      .setRunningMode(RunningMode.IMAGE)
+                      .setNumFaces(2)
+                      .build()
+                  landmarker = FaceLandmarker.createFromOptions(this, opts)
+              }
+
+              override fun onStart() { super.onStart(); if (!permAsked) route() }
+
+              override fun onStop() {
+                  super.onStop()
+                  unlocked = false; reenroll = false
+                  dlg?.dismiss(); stopCamera()
+              }
+
+              override fun onDestroy() {
+                  super.onDestroy()
+                  exec.execute { landmarker?.close() }
+              }
+
+              // ---------- Ablauf ----------
+              private fun route() {
+                  if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+                      if (!permAsked) { permAsked = true; permLauncher.launch(Manifest.permission.CAMERA) }
+                      return
+                  }
+                  dlg?.dismiss(); stopCamera()
+                  val until = prefs.getLong("until", 0)
+                  when {
+                      !prefs.contains("pin") -> setupPin()
+                      !unlocked && System.currentTimeMillis() < until -> showLocked(until)
+                      !prefs.contains("tpl") || reenroll -> if (unlocked) startScan(Mode.ENROLL) else askPin(false)
+                      unlocked -> showVault()
+                      else -> startScan(Mode.VERIFY)
+                  }
+              }
+
+              // ---------- Hilfen ----------
+              private fun dp(x: Int) = (x * resources.displayMetrics.density).toInt()
+              private fun ui(v: View) { root.removeAllViews(); root.addView(v, MATCH, MATCH) }
+              private fun tv(t: String, size: Float = 18f) = TextView(this).apply {
+                  text = t; textSize = size; setTextColor(Color.WHITE); gravity = Gravity.CENTER; setPadding(dp(16), dp(8), dp(16), dp(8))
+              }
+              private fun btn(t: String, f: () -> Unit) = Button(this).apply { text = t; setOnClickListener { f() } }
+              private fun pinField(hint: String) = EditText(this).apply {
+                  this.hint = hint; setTextColor(Color.WHITE); setHintTextColor(Color.GRAY)
+                  inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
+              }
+              private fun col() = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; setPadding(dp(24), dp(24), dp(24), dp(24)) }
+              private fun status(s: String) { statusView?.text = s }
+
+              // ---------- PIN ----------
+              private fun hash(pin: String, salt: ByteArray): ByteArray =
+                  SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(PBEKeySpec(pin.toCharArray(), salt, 120000, 256)).encoded
+
+              private fun savePin(pin: String) {
+                  val salt = ByteArray(16).also { SecureRandom().nextBytes(it) }
+                  prefs.edit().putString("pin", Base64.encodeToString(salt, 0) + ":" + Base64.encodeToString(hash(pin, salt), 0)).apply()
+              }
+
+              private fun checkPin(pin: String): Boolean {
+                  val parts = prefs.getString("pin", "")!!.split(":")
+                  if (parts.size != 2) return false
+                  val h = hash(pin, Base64.decode(parts[0], 0))
+                  return java.security.MessageDigest.isEqual(h, Base64.decode(parts[1], 0))
+              }
+
+              private fun registerFail() {
+                  val f = prefs.getInt("fails", 0) + 1
+                  val e = prefs.edit().putInt("fails", f)
+                  if (f >= 5) e.putLong("until", System.currentTimeMillis() + minOf(30000L * (1L shl minOf(f - 5, 7)), 3600000L))
+                  e.apply()
+              }
+
+              private fun success() {
+                  prefs.edit().putInt("fails", 0).putLong("until", 0).apply()
+                  unlocked = true
+                  route()
+              }
+
+              private fun setupPin() {
+                  val c = col()
+                  val a = pinField("Neue PIN (mind. 6 Ziffern)")
+                  val b = pinField("PIN wiederholen")
+                  c.addView(tv("Willkommen bei FaceLock\nLege zuerst eine Notfall-PIN fest.", 20f))
+                  c.addView(a, MATCH, WRAP); c.addView(b, MATCH, WRAP)
+                  c.addView(btn("Weiter") {
+                      val p = a.text.toString()
+                      if (p.length < 6 || p != b.text.toString()) Toast.makeText(this, "PIN zu kurz oder ungleich", Toast.LENGTH_SHORT).show()
+                      else { savePin(p); unlocked = true; route() }
+                  })
+                  ui(c)
+              }
+
+              private fun askPin(cancelable: Boolean) {
+                  val f = pinField("PIN")
+                  dlg?.dismiss()
+                  dlg = AlertDialog.Builder(this).setTitle("PIN eingeben").setView(f).setCancelable(cancelable)
+                      .setPositiveButton("OK") { _, _ ->
+                          if (checkPin(f.text.toString())) success() else { registerFail(); route() }
+                      }
+                      .setNegativeButton("Abbrechen") { _, _ -> if (!cancelable) finish() }
+                      .show()
+              }
+
+              private fun showLocked(until: Long) {
+                  val t = tv("", 20f)
+                  ui(col().apply { addView(t) })
+                  val r = object : Runnable {
+                      override fun run() {
+                          val left = (until - System.currentTimeMillis()) / 1000
+                          if (left <= 0) route() else { t.text = "Zu viele Fehlversuche.\nGesperrt fuer " + left + " s"; handler.postDelayed(this, 1000) }
+                      }
+                  }
+                  r.run()
+              }
+
+              // ---------- Tresor ----------
+              private fun showVault() {
+                  val c = col()
+                  c.addView(tv("Entsperrt - dein Tresor", 20f))
+                  val note = EditText(this).apply {
+                      setText(prefs.getString("note", "")); setTextColor(Color.WHITE); hint = "Geheime Notizen..."
+                      setHintTextColor(Color.GRAY); gravity = Gravity.TOP; minLines = 8
+                  }
+                  c.addView(note, MATCH, WRAP)
+                  c.addView(btn("Speichern (verschluesselt)") { prefs.edit().putString("note", note.text.toString()).apply(); Toast.makeText(this, "Gespeichert", Toast.LENGTH_SHORT).show() })
+                  c.addView(btn("Gesicht neu einrichten") { reenroll = true; route() })
+                  c.addView(btn("PIN aendern") {
+                      val f = pinField("Neue PIN (mind. 6 Ziffern)")
+                      AlertDialog.Builder(this).setTitle("PIN aendern").setView(f)
+                          .setPositiveButton("OK") { _, _ -> if (f.text.length >= 6) savePin(f.text.toString()) }
+                          .setNegativeButton("Abbrechen", null).show()
+                  })
+                  c.addView(btn("Sperren") { unlocked = false; route() })
+                  ui(c)
+              }
+
+              // ---------- Kamera / Scan ----------
+              private fun startScan(m: Mode) {
+                  samples.clear(); blink = false; openSeen = false; closed = false; lastSample = 0
+                  val pv = PreviewView(this)
+                  val st = tv(if (m == Mode.ENROLL) "Schau geradeaus, neutraler Ausdruck" else "Schau in die Kamera und blinzle einmal")
+                  st.setBackgroundColor(0x99000000.toInt())
+                  statusView = st
+                  val fl = FrameLayout(this)
+                  fl.addView(pv, MATCH, MATCH)
+                  fl.addView(st, FrameLayout.LayoutParams(MATCH, WRAP, Gravity.BOTTOM).apply { bottomMargin = dp(110) })
+                  if (m == Mode.VERIFY) fl.addView(btn("Mit PIN oeffnen") { askPin(true) },
+                      FrameLayout.LayoutParams(WRAP, WRAP, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = dp(36) })
+                  ui(fl)
+                  mode = m
+                  val fut = ProcessCameraProvider.getInstance(this)
+                  fut.addListener({
+                      val p = fut.get(); provider = p
+                      val prev = Preview.Builder().build().also { it.setSurfaceProvider(pv.surfaceProvider) }
+                      val an = ImageAnalysis.Builder()
+                          .setTargetResolution(Size(720, 960))
+                          .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                          .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
+                          .build()
+                      an.setAnalyzer(exec) { analyze(it) }
+                      p.unbindAll()
+                      p.bindToLifecycle(this, CameraSelector.DEFAULT_FRONT_CAMERA, prev, an)
+                  }, ContextCompat.getMainExecutor(this))
+              }
+
+              private fun stopCamera() { mode = Mode.NONE; provider?.unbindAll() }
+
+              private fun analyze(img: ImageProxy) {
+                  try {
+                      if (mode == Mode.NONE) return
+                      val bmp = img.toBitmap()
+                      val m = Matrix().apply { postRotate(img.imageInfo.rotationDegrees.toFloat()) }
+                      val rb = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, m, true)
+                      val res = landmarker?.detect(BitmapImageBuilder(rb).build()) ?: return
+                      val faces = res.faceLandmarks()
+                      val fd = if (faces.size == 1) Face.analyze(faces[0], rb.width.toFloat(), rb.height.toFloat()) else null
+                      val n = faces.size
+                      handler.post { onFrame(fd, n) }
+                  } catch (e: Exception) {
+                  } finally { img.close() }
+              }
+
+              private fun onFrame(fd: FaceData?, n: Int) {
+                  if (mode == Mode.NONE) return
+                  if (n == 0) { status("Kein Gesicht erkannt"); return }
+                  if (n > 1 || fd == null) { status("Nur ein Gesicht erlaubt"); return }
+                  if (fd.front < 0.94f) { status("Schau gerade in die Kamera"); return }
+                  val now = System.currentTimeMillis()
+                  if (mode == Mode.ENROLL) {
+                      if (fd.ear < 0.2f || now - lastSample < 120) return
+                      lastSample = now; samples.add(fd.desc)
+                      status("Scanne... " + samples.size + "/" + ENROLL_FRAMES)
+                      if (samples.size >= ENROLL_FRAMES) finishEnroll()
+                      return
+                  }
+                  // VERIFY: Blinzeln als Lebendigkeitstest, danach Frames sammeln
+                  if (fd.ear > 0.23f) { if (closed) { blink = true; samples.clear() }; openSeen = true; closed = false }
+                  else if (fd.ear < 0.17f && openSeen) closed = true
+                  if (!blink) { status("Bitte einmal blinzeln"); return }
+                  if (fd.ear > 0.22f && now - lastSample > 100) { lastSample = now; samples.add(fd.desc) }
+                  status("Pruefe... " + samples.size + "/" + VERIFY_FRAMES)
+                  if (samples.size >= VERIFY_FRAMES) {
+                      val d = Face.dist(Face.avg(samples), Face.decode(prefs.getString("tpl", "")!!))
+                      val thr = prefs.getFloat("thr", 0.02f)
+                      if (d <= thr) success()
+                      else {
+                          registerFail()
+                          samples.clear(); blink = false; openSeen = false; closed = false
+                          if (System.currentTimeMillis() < prefs.getLong("until", 0)) route()
+                          else status("Nicht erkannt (Abweichung " + "%.3f".format(d) + " > " + "%.3f".format(thr) + ")")
+                      }
+                  }
+              }
+
+              private fun finishEnroll() {
+                  val mean = Face.avg(samples)
+                  val devs = samples.map { Face.dist(it, mean) }
+                  val mu = devs.average().toFloat()
+                  val sd = Math.sqrt(devs.map { (it - mu) * (it - mu).toDouble() }.average()).toFloat()
+                  val thr = (mu + 2 * sd).coerceIn(0.012f, 0.03f)
+                  prefs.edit().putString("tpl", Face.encode(mean)).putFloat("thr", thr).apply()
+                  reenroll = false
+                  Toast.makeText(this, "Gesicht gespeichert", Toast.LENGTH_SHORT).show()
+                  success()
+              }
+          }
+          EOF
+
+      - name: MediaPipe Face-Landmarker-Modell laden
+        run: |
+          curl -L --fail -o app/src/main/assets/face_landmarker.task \
+            https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task
+
+      - name: APK bauen
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FaceLock-APK
+          path: app/build/outputs/apk/debug/app-debug.apk

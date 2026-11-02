@@ -1,4 +1,4 @@
-name: Build APK
+name: Build Glim APK
 
 on:
   push:
@@ -21,7 +21,7 @@ jobs:
 
       - name: Projekt schreiben
         run: |
-          mkdir -p app/src/main/java/com/example/scan3d
+          mkdir -p app/src/main/java/com/example/glim app/src/main/res/drawable app/src/main/res/mipmap-anydpi-v26
 
           cat > settings.gradle.kts <<'EOF'
           pluginManagement {
@@ -30,7 +30,7 @@ jobs:
           dependencyResolutionManagement {
               repositories { google(); mavenCentral() }
           }
-          rootProject.name = "Scan3D"
+          rootProject.name = "Glim"
           include(":app")
           EOF
 
@@ -52,10 +52,10 @@ jobs:
               id("org.jetbrains.kotlin.android")
           }
           android {
-              namespace = "com.example.scan3d"
+              namespace = "com.example.glim"
               compileSdk = 34
               defaultConfig {
-                  applicationId = "com.example.scan3d"
+                  applicationId = "com.example.glim"
                   minSdk = 26
                   targetSdk = 34
                   versionCode = 1
@@ -81,10 +81,15 @@ jobs:
           cat > app/src/main/AndroidManifest.xml <<'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET" />
               <application
-                  android:label="Scan3D"
+                  android:label="Glim"
+                  android:icon="@mipmap/ic_launcher"
                   android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
-                  <activity android:name=".MainActivity" android:exported="true">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:windowSoftInputMode="adjustResize">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
                           <category android:name="android.intent.category.LAUNCHER" />
@@ -94,193 +99,143 @@ jobs:
           </manifest>
           EOF
 
-          cat > app/src/main/java/com/example/scan3d/MainActivity.kt <<'EOF'
-          package com.example.scan3d
+          cat > app/src/main/res/drawable/ic_bg.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android">
+              <gradient android:angle="315" android:startColor="#22D3EE" android:centerColor="#8B5CF6" android:endColor="#EC4899" />
+          </shape>
+          EOF
+
+          cat > app/src/main/res/drawable/ic_fg.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp" android:height="108dp"
+              android:viewportWidth="108" android:viewportHeight="108">
+              <group android:scaleX="0.85" android:scaleY="0.85" android:pivotX="54" android:pivotY="54">
+                  <path android:fillColor="#F2FFFFFF"
+                      android:pathData="M30,34h48a10,10 0 0,1 10,10v22a10,10 0 0,1 -10,10h-30l-14,14v-14h-4a10,10 0 0,1 -10,-10v-22a10,10 0 0,1 10,-10z" />
+                  <path android:fillColor="#7C4DFF"
+                      android:pathData="M36,55a4,4 0 1,1 8,0a4,4 0 1,1 -8,0M50,55a4,4 0 1,1 8,0a4,4 0 1,1 -8,0M64,55a4,4 0 1,1 8,0a4,4 0 1,1 -8,0" />
+              </group>
+          </vector>
+          EOF
+
+          cat > app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@drawable/ic_bg" />
+              <foreground android:drawable="@drawable/ic_fg" />
+          </adaptive-icon>
+          EOF
+
+          cat > app/src/main/java/com/example/glim/MainActivity.kt <<'EOF'
+          package com.example.glim
 
           import android.content.Context
-          import android.graphics.Bitmap
-          import android.graphics.BitmapFactory
+          import android.content.Intent
+          import android.content.SharedPreferences
           import android.net.Uri
           import android.os.Bundle
           import androidx.activity.ComponentActivity
-          import androidx.activity.compose.rememberLauncherForActivityResult
+          import androidx.activity.compose.BackHandler
           import androidx.activity.compose.setContent
           import androidx.activity.enableEdgeToEdge
-          import androidx.activity.result.contract.ActivityResultContracts
           import androidx.compose.animation.*
           import androidx.compose.animation.core.*
           import androidx.compose.foundation.*
-          import androidx.compose.foundation.gestures.detectTransformGestures
+          import androidx.compose.foundation.layout.*
+          import androidx.compose.foundation.lazy.LazyColumn
+          import androidx.compose.foundation.lazy.items
+          import androidx.compose.foundation.lazy.itemsIndexed
+          import androidx.compose.foundation.lazy.rememberLazyListState
           import androidx.compose.foundation.interaction.MutableInteractionSource
           import androidx.compose.foundation.interaction.collectIsPressedAsState
-          import androidx.compose.foundation.layout.*
-          import androidx.compose.foundation.lazy.LazyRow
-          import androidx.compose.foundation.lazy.itemsIndexed
+          import androidx.compose.foundation.shape.CircleShape
           import androidx.compose.foundation.shape.RoundedCornerShape
+          import androidx.compose.foundation.text.BasicTextField
           import androidx.compose.material3.Text
           import androidx.compose.runtime.*
           import androidx.compose.ui.Alignment
           import androidx.compose.ui.Modifier
           import androidx.compose.ui.draw.clip
-          import androidx.compose.ui.geometry.Offset
+          import androidx.compose.ui.geometry.*
           import androidx.compose.ui.graphics.*
-          import androidx.compose.ui.input.pointer.pointerInput
-          import androidx.compose.ui.layout.ContentScale
           import androidx.compose.ui.platform.LocalContext
+          import androidx.compose.ui.text.TextStyle
           import androidx.compose.ui.text.font.FontWeight
           import androidx.compose.ui.unit.*
           import kotlinx.coroutines.*
-          import kotlin.math.*
+          import org.json.JSONArray
+          import org.json.JSONObject
+          import java.net.HttpURLConnection
+          import java.net.URL
+          import java.time.Instant
+          import kotlin.math.abs
 
-          const val M = 192
-          val PIf = PI.toFloat()
+          class Msg(val id: Long, val from: String, val to: String, val body: String, val kind: String)
+          class Prof(val name: String, val status: String)
 
-          class ScanView(val w: Int, val h: Int, val mask: BooleanArray, val px: IntArray, val bmp: Bitmap)
-          class Model(val n: Int, val p: FloatArray, val nr: FloatArray, val c: IntArray)
-          data class Preset(val name: String, val n: Int, val tol: Int)
-
-          val PRESETS = listOf(
-              Preset("Allgemein", 60, 1), Preset("Kopf", 72, 1), Preset("Körper", 64, 1),
-              Preset("Flasche", 64, 0), Preset("Tisch", 64, 1)
-          )
-
-          // ---------- Bildverarbeitung (reiner Algorithmus) ----------
-          fun loadView(ctx: Context, uri: Uri): ScanView? {
-              try {
-                  val cr = ctx.contentResolver
-                  val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                  cr.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, o) }
-                  var s = 1
-                  while (max(o.outWidth, o.outHeight) / s > 1200) s *= 2
-                  val src = cr.openInputStream(uri)?.use {
-                      BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = s })
-                  } ?: return null
-                  val deg = cr.openInputStream(uri)?.use {
-                      when (android.media.ExifInterface(it).getAttributeInt(android.media.ExifInterface.TAG_ORIENTATION, 1)) {
-                          6 -> 90f; 3 -> 180f; 8 -> 270f; else -> 0f
-                      }
-                  } ?: 0f
-                  val mat = android.graphics.Matrix().apply { postRotate(deg) }
-                  val rot = Bitmap.createBitmap(src, 0, 0, src.width, src.height, mat, true)
-                  val sc = M.toFloat() / max(rot.width, rot.height)
-                  val bmp = Bitmap.createScaledBitmap(rot, max(1, (rot.width * sc).toInt()), max(1, (rot.height * sc).toInt()), true)
-                  return segment(bmp)
-              } catch (e: Exception) { return null }
-          }
-
-          fun segment(bmp: Bitmap): ScanView {
-              val w = bmp.width; val h = bmp.height
-              val px = IntArray(w * h); bmp.getPixels(px, 0, w, 0, 0, w, h)
-              var r0 = 0L; var g0 = 0L; var b0 = 0L; var c = 0L
-              for (y in 0 until h) for (x in 0 until w) if (x < 5 || y < 5 || x >= w - 5 || y >= h - 5) {
-                  val p = px[y * w + x]
-                  r0 += (p shr 16) and 255; g0 += (p shr 8) and 255; b0 += p and 255; c++
+          // ---------- Datenbank (Supabase / PostgREST über HTTPS) ----------
+          object Api {
+              var url = ""; var key = ""
+              fun call(method: String, path: String, body: String? = null): String {
+                  val c = URL("${url.trimEnd('/')}/rest/v1/$path").openConnection() as HttpURLConnection
+                  c.requestMethod = method; c.connectTimeout = 8000; c.readTimeout = 8000
+                  c.setRequestProperty("apikey", key)
+                  c.setRequestProperty("Authorization", "Bearer $key")
+                  c.setRequestProperty("Content-Type", "application/json")
+                  c.setRequestProperty("Prefer", "resolution=merge-duplicates,return=minimal")
+                  if (body != null) { c.doOutput = true; c.outputStream.use { it.write(body.toByteArray()) } }
+                  val code = c.responseCode
+                  val s = (if (code < 400) c.inputStream else c.errorStream)?.bufferedReader()?.readText() ?: ""
+                  if (code >= 400) throw Exception("$code $s")
+                  return s
               }
-              val br = r0 / c.toFloat(); val bg = g0 / c.toFloat(); val bb = b0 / c.toFloat()
-              val q = IntArray(w * h); val hist = IntArray(256)
-              for (i in px.indices) {
-                  val p = px[i]
-                  val dr = ((p shr 16) and 255) - br; val dg = ((p shr 8) and 255) - bg; val db = (p and 255) - bb
-                  q[i] = (sqrt(dr * dr + dg * dg + db * db) / 441f * 255f).toInt().coerceIn(0, 255)
-                  hist[q[i]]++
+              fun profiles(): List<Prof> {
+                  val a = JSONArray(call("GET", "profiles?select=*&order=name"))
+                  return (0 until a.length()).map { val o = a.getJSONObject(it); Prof(o.getString("name"), o.optString("status", "")) }
               }
-              var sum = 0.0; for (i in 0..255) sum += i * hist[i]
-              var sB = 0.0; var wB = 0; var best = -1.0; var th = 20
-              for (i in 0..255) {
-                  wB += hist[i]; if (wB == 0) continue
-                  val wF = q.size - wB; if (wF == 0) break
-                  sB += i * hist[i]
-                  val mB = sB / wB; val mF = (sum - sB) / wF
-                  val v = wB.toDouble() * wF * (mB - mF) * (mB - mF)
-                  if (v > best) { best = v; th = i }
+              fun join(name: String) { call("POST", "profiles", JSONObject().put("name", name).toString()) }
+              fun setStatus(name: String, s: String) {
+                  call("POST", "profiles", JSONObject().put("name", name).put("status", s).put("status_at", Instant.now().toString()).toString())
               }
-              th = max(th, 12)
-              var mask = BooleanArray(w * h) { q[it] > th }
-              repeat(2) { mask = smooth(mask, w, h) }
-              return ScanView(w, h, mask, px, bmp)
-          }
-
-          fun smooth(m: BooleanArray, w: Int, h: Int): BooleanArray {
-              val o = BooleanArray(m.size)
-              for (y in 0 until h) for (x in 0 until w) {
-                  var c = 0
-                  for (dy in -1..1) for (dx in -1..1) {
-                      val xx = x + dx; val yy = y + dy
-                      if (xx in 0 until w && yy in 0 until h && m[yy * w + xx]) c++
-                  }
-                  o[y * w + x] = c >= 5
+              fun send(from: String, to: String, body: String, kind: String) {
+                  call("POST", "messages", JSONObject().put("sender", from).put("receiver", to).put("body", body).put("kind", kind).toString())
               }
-              return o
-          }
-
-          // Visual Hull: Voxel bleibt nur, wenn er in (fast) allen Silhouetten liegt
-          fun carve(vs: List<ScanView>, n: Int, tol: Int, flip: Boolean): Model {
-              val k = vs.size
-              var gMin = 1e9f; var gMax = -1e9f; var maxW = 0f; var cxs = 0f; var cnt = 0
-              for (v in vs) {
-                  var x0 = v.w; var x1 = -1; var y0 = v.h; var y1 = -1
-                  for (y in 0 until v.h) for (x in 0 until v.w) if (v.mask[y * v.w + x]) {
-                      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y
-                  }
-                  if (x1 < 0) continue
-                  cxs += (x0 + x1 + 1) / 2f; cnt++
-                  gMin = min(gMin, y0.toFloat()); gMax = max(gMax, (y1 + 1).toFloat())
-                  maxW = max(maxW, (x1 - x0 + 1).toFloat())
-              }
-              if (cnt == 0) return Model(n, FloatArray(0), FloatArray(0), IntArray(0))
-              val cx = cxs / cnt; val cy = (gMin + gMax) / 2f
-              val half = max(gMax - gMin, maxW) / 2f * 1.08f
-              val sgn = if (flip) -1f else 1f
-              val cs = FloatArray(k) { cos(sgn * 2f * PIf * it / k) }
-              val sn = FloatArray(k) { sin(sgn * 2f * PIf * it / k) }
-              val occ = BooleanArray(n * n * n)
-              for (xi in 0 until n) {
-                  val x = (xi + 0.5f) / n * 2 - 1
-                  for (yi in 0 until n) {
-                      val y = (yi + 0.5f) / n * 2 - 1
-                      for (zi in 0 until n) {
-                          val z = (zi + 0.5f) / n * 2 - 1
-                          var bad = 0
-                          for (i in 0 until k) {
-                              val v = vs[i]
-                              val px = floor(cx + (x * cs[i] + z * sn[i]) * half).toInt()
-                              val py = floor(cy - y * half).toInt()
-                              if (px < 0 || py < 0 || px >= v.w || py >= v.h || !v.mask[py * v.w + px]) {
-                                  bad++; if (bad > tol) break
-                              }
-                          }
-                          occ[(xi * n + yi) * n + zi] = bad <= tol
-                      }
+              private fun msgs(j: String): List<Msg> {
+                  val a = JSONArray(j)
+                  return (0 until a.length()).map {
+                      val o = a.getJSONObject(it)
+                      Msg(o.getLong("id"), o.getString("sender"), o.getString("receiver"), o.optString("body"), o.optString("kind", "text"))
                   }
               }
-              fun o(x: Int, y: Int, z: Int) = x in 0 until n && y in 0 until n && z in 0 until n && occ[(x * n + y) * n + z]
-              val dirs = arrayOf(intArrayOf(1, 0, 0), intArrayOf(-1, 0, 0), intArrayOf(0, 1, 0),
-                  intArrayOf(0, -1, 0), intArrayOf(0, 0, 1), intArrayOf(0, 0, -1))
-              val pl = ArrayList<Float>(); val nl = ArrayList<Float>(); val cl = ArrayList<Int>()
-              for (xi in 0 until n) for (yi in 0 until n) for (zi in 0 until n) {
-                  if (!occ[(xi * n + yi) * n + zi]) continue
-                  var nx = 0f; var ny = 0f; var nz = 0f
-                  for (d in dirs) if (!o(xi + d[0], yi + d[1], zi + d[2])) { nx += d[0]; ny += d[1]; nz += d[2] }
-                  if (nx == 0f && ny == 0f && nz == 0f) continue
-                  val l = sqrt(nx * nx + ny * ny + nz * nz); nx /= l; ny /= l; nz /= l
-                  val x = (xi + 0.5f) / n * 2 - 1; val y = (yi + 0.5f) / n * 2 - 1; val z = (zi + 0.5f) / n * 2 - 1
-                  var bd = -2f; var bi = 0
-                  for (i in 0 until k) { val d = -sn[i] * nx + cs[i] * nz; if (d > bd) { bd = d; bi = i } }
-                  val v = vs[bi]
-                  val px = floor(cx + (x * cs[bi] + z * sn[bi]) * half).toInt().coerceIn(0, v.w - 1)
-                  val py = floor(cy - y * half).toInt().coerceIn(0, v.h - 1)
-                  pl.add(x); pl.add(y); pl.add(z); nl.add(nx); nl.add(ny); nl.add(nz)
-                  cl.add(v.px[py * v.w + px])
+              fun chat(me: String, o: String): List<Msg> {
+                  val m = Uri.encode(me); val x = Uri.encode(o)
+                  return msgs(call("GET", "messages?select=*&order=id.asc&limit=300&or=(and(sender.eq.$m,receiver.eq.$x),and(sender.eq.$x,receiver.eq.$m))"))
               }
-              return Model(n, pl.toFloatArray(), nl.toFloatArray(), cl.toIntArray())
+              fun calls(me: String): List<Msg> {
+                  val m = Uri.encode(me)
+                  return msgs(call("GET", "messages?select=*&kind=eq.call&order=id.desc&limit=40&or=(sender.eq.$m,receiver.eq.$m)"))
+              }
           }
 
-          // ---------- UI ----------
+          fun openUrl(ctx: Context, u: String) {
+              try { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(u)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (e: Exception) {}
+          }
+
+          // ---------- Design-Bausteine ----------
           fun Modifier.glass(r: Dp = 28.dp, a: Float = 0.12f): Modifier {
               val sh = RoundedCornerShape(r)
               return this.clip(sh)
                   .background(Brush.verticalGradient(listOf(Color.White.copy(a + 0.10f), Color.White.copy(a * 0.5f))))
                   .border(1.dp, Brush.linearGradient(listOf(Color.White.copy(0.75f), Color.White.copy(0.05f), Color.White.copy(0.35f))), sh)
+          }
+
+          @Composable
+          fun Modifier.appear(d: Int = 0): Modifier {
+              val a = remember { Animatable(0f) }
+              LaunchedEffect(Unit) { delay(d.toLong()); a.animateTo(1f, spring(0.7f, 200f)) }
+              return graphicsLayer { alpha = a.value.coerceIn(0f, 1f); translationY = (1f - a.value) * 40f }
           }
 
           @Composable
@@ -290,17 +245,42 @@ jobs:
           @Composable
           fun Backdrop() {
               val t by rememberInfiniteTransition(label = "bg").animateFloat(
-                  0f, 6.2832f, infiniteRepeatable(tween(16000, easing = LinearEasing)), label = "p")
+                  0f, 6.2832f, infiniteRepeatable(tween(18000, easing = LinearEasing)), label = "p")
               Canvas(Modifier.fillMaxSize()) {
                   drawRect(Brush.verticalGradient(listOf(Color(0xFF070B1A), Color(0xFF140A2E))))
                   val w = size.width; val h = size.height
                   fun blob(c: Color, fx: Float, fy: Float, ph: Float, r: Float) {
-                      val ctr = Offset(w * (fx + 0.12f * sin(t + ph)), h * (fy + 0.08f * cos(t * 1.3f + ph)))
+                      val ctr = Offset(w * (fx + 0.12f * kotlin.math.sin(t + ph)), h * (fy + 0.08f * kotlin.math.cos(t * 1.3f + ph)))
                       drawCircle(Brush.radialGradient(listOf(c, Color.Transparent), ctr, r), r, ctr)
                   }
-                  blob(Color(0xCC2DD4FF), .2f, .2f, 0f, w * .7f)
-                  blob(Color(0xCCB26BFF), .85f, .45f, 2f, w * .8f)
-                  blob(Color(0xCCFF4F9A), .3f, .85f, 4f, w * .7f)
+                  blob(Color(0xCC22D3EE), .15f, .15f, 0f, w * .75f)
+                  blob(Color(0xCC8B5CF6), .9f, .5f, 2f, w * .85f)
+                  blob(Color(0xCCEC4899), .25f, .88f, 4f, w * .75f)
+              }
+          }
+
+          @Composable
+          fun Logo(s: Dp) {
+              val t by rememberInfiniteTransition(label = "l").animateFloat(
+                  0f, 1f, infiniteRepeatable(tween(2600, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "f")
+              Canvas(Modifier.size(s).graphicsLayer { translationY = (t - 0.5f) * s.toPx() * 0.06f; rotationZ = (t - 0.5f) * 4f }) {
+                  val w = size.width
+                  drawRoundRect(Brush.linearGradient(listOf(Color(0xFF22D3EE), Color(0xFF8B5CF6), Color(0xFFEC4899))), cornerRadius = CornerRadius(w * .3f))
+                  val p = Path().apply {
+                      addRoundRect(RoundRect(w * .2f, w * .24f, w * .8f, w * .64f, w * .14f, w * .14f))
+                      moveTo(w * .34f, w * .6f); lineTo(w * .30f, w * .8f); lineTo(w * .52f, w * .62f); close()
+                  }
+                  drawPath(p, Color.White.copy(0.95f))
+                  for (i in 0..2) drawCircle(Color(0xFF7C4DFF), w * .04f, Offset(w * (.36f + .14f * i), w * .44f))
+              }
+          }
+
+          @Composable
+          fun Avatar(name: String, s: Dp = 48.dp) {
+              val h = abs(name.hashCode())
+              val a = Color.hsv((h % 360).toFloat(), 0.55f, 1f); val b = Color.hsv(((h / 7) % 360).toFloat(), 0.7f, 0.85f)
+              Box(Modifier.size(s).clip(CircleShape).background(Brush.linearGradient(listOf(a, b))), contentAlignment = Alignment.Center) {
+                  T(name.take(1).uppercase(), (s.value * 0.42f).sp, FontWeight.Bold)
               }
           }
 
@@ -308,155 +288,256 @@ jobs:
           fun GlassButton(text: String, modifier: Modifier = Modifier, enabled: Boolean = true, accent: Boolean = false, onClick: () -> Unit) {
               val src = remember { MutableInteractionSource() }
               val pressed by src.collectIsPressedAsState()
-              val sc by animateFloatAsState(if (pressed) 0.93f else 1f, spring(dampingRatio = 0.4f, stiffness = 500f), label = "s")
+              val sc by animateFloatAsState(if (pressed) 0.93f else 1f, spring(0.4f, 500f), label = "s")
               Box(
-                  modifier
-                      .graphicsLayer { scaleX = sc; scaleY = sc; alpha = if (enabled) 1f else 0.4f }
+                  modifier.graphicsLayer { scaleX = sc; scaleY = sc; alpha = if (enabled) 1f else 0.4f }
                       .glass(26.dp, if (accent) 0.22f else 0.12f)
-                      .then(if (accent) Modifier.background(Brush.linearGradient(listOf(Color(0x5538E8FF), Color(0x55B06CFF)))) else Modifier)
+                      .then(if (accent) Modifier.background(Brush.linearGradient(listOf(Color(0x5522D3EE), Color(0x558B5CF6)))) else Modifier)
                       .clickable(interactionSource = src, indication = null, enabled = enabled, onClick = onClick)
-                      .padding(vertical = 17.dp, horizontal = 18.dp),
+                      .padding(vertical = 16.dp, horizontal = 18.dp),
                   contentAlignment = Alignment.Center
               ) { T(text, 16.sp, FontWeight.SemiBold) }
           }
 
           @Composable
-          fun Chip(text: String, sel: Boolean, onClick: () -> Unit) {
-              val a by animateFloatAsState(if (sel) 0.34f else 0.08f, spring(stiffness = 300f), label = "c")
-              Box(Modifier.glass(20.dp, a).clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp)) {
-                  T(text, 14.sp, FontWeight.SemiBold)
-              }
+          fun RoundBtn(text: String, onClick: () -> Unit) {
+              Box(Modifier.size(44.dp).glass(22.dp, 0.14f).clickable(onClick = onClick), contentAlignment = Alignment.Center) { T(text, 18.sp) }
           }
 
           @Composable
-          fun Pulse(text: String) {
-              val a by rememberInfiniteTransition(label = "pl").animateFloat(
-                  0.35f, 1f, infiniteRepeatable(tween(800), RepeatMode.Reverse), label = "a")
-              T(text, 16.sp, FontWeight.Medium, a)
+          fun GlassField(v: String, on: (String) -> Unit, hint: String, modifier: Modifier = Modifier.fillMaxWidth()) {
+              BasicTextField(
+                  v, on, singleLine = true,
+                  textStyle = TextStyle(color = Color.White, fontSize = 16.sp),
+                  cursorBrush = SolidColor(Color.White),
+                  modifier = modifier.glass(22.dp, 0.10f).padding(16.dp),
+                  decorationBox = { inner -> Box { if (v.isEmpty()) T(hint, 16.sp, a = 0.4f); inner() } }
+              )
           }
 
+          // ---------- Screens ----------
           @Composable
-          fun Viewer(m: Model, modifier: Modifier) {
-              var yaw by remember { mutableFloatStateOf(0.6f) }
-              var pitch by remember { mutableFloatStateOf(0.25f) }
-              var zoom by remember { mutableFloatStateOf(1f) }
-              var last by remember { mutableLongStateOf(0L) }
-              val appear = remember { Animatable(0f) }
-              LaunchedEffect(m) { appear.snapTo(0f); appear.animateTo(1f, spring(0.5f, 60f)) }
-              LaunchedEffect(Unit) {
-                  while (true) withFrameNanos { if (System.nanoTime() - last > 1_500_000_000L) yaw += 0.007f }
-              }
-              Canvas(modifier.pointerInput(Unit) {
-                  detectTransformGestures { _, pan, z, _ ->
-                      yaw += pan.x * 0.009f
-                      pitch = (pitch + pan.y * 0.009f).coerceIn(-1.4f, 1.4f)
-                      zoom = (zoom * z).coerceIn(0.4f, 4f)
-                      last = System.nanoTime()
-                  }
-              }) {
-                  val cnt = m.c.size
-                  if (cnt == 0) return@Canvas
-                  val s = min(size.width, size.height) * 0.46f * zoom * appear.value
-                  val cyw = cos(yaw); val syw = sin(yaw); val cp = cos(pitch); val sp = sin(pitch)
-                  val sx = FloatArray(cnt); val sy = FloatArray(cnt); val keys = LongArray(cnt)
-                  for (i in 0 until cnt) {
-                      val x = m.p[3 * i]; val y = m.p[3 * i + 1]; val z = m.p[3 * i + 2]
-                      val x1 = x * cyw + z * syw; val z1 = -x * syw + z * cyw
-                      val y1 = y * cp - z1 * sp; val z2 = y * sp + z1 * cp
-                      sx[i] = size.width / 2 + x1 * s; sy[i] = size.height / 2 - y1 * s
-                      keys[i] = (((z2 + 2f) * 10000f).toInt().toLong() shl 20) or i.toLong()
-                  }
-                  keys.sort()
-                  val rad = s * (2f / m.n) * 0.72f
-                  for (key in keys) {
-                      val i = (key and 0xFFFFF).toInt()
-                      val nx = m.nr[3 * i]; val ny = m.nr[3 * i + 1]; val nz = m.nr[3 * i + 2]
-                      val nx1 = nx * cyw + nz * syw; val nz1 = -nx * syw + nz * cyw
-                      val ny1 = ny * cp - nz1 * sp; val nz2 = ny * sp + nz1 * cp
-                      val dif = max(0f, -0.4f * nx1 + 0.6f * ny1 + 0.7f * nz2)
-                      val light = 0.4f + 0.75f * dif
-                      val c = m.c[i]
-                      drawCircle(
-                          Color(
-                              (((c shr 16) and 255) / 255f * light).coerceIn(0f, 1f),
-                              (((c shr 8) and 255) / 255f * light).coerceIn(0f, 1f),
-                              ((c and 255) / 255f * light).coerceIn(0f, 1f)
-                          ), rad, Offset(sx[i], sy[i])
-                      )
+          fun Setup(sp: SharedPreferences, done: (String) -> Unit) {
+              var url by remember { mutableStateOf(sp.getString("url", "") ?: "") }
+              var key by remember { mutableStateOf(sp.getString("key", "") ?: "") }
+              var name by remember { mutableStateOf("") }
+              var err by remember { mutableStateOf("") }
+              var busy by remember { mutableStateOf(false) }
+              val scope = rememberCoroutineScope()
+              Column(
+                  Modifier.fillMaxSize().systemBarsPadding().imePadding().verticalScroll(rememberScrollState()).padding(24.dp),
+                  horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)
+              ) {
+                  Spacer(Modifier.height(24.dp))
+                  Logo(96.dp)
+                  T("Glim", 40.sp, FontWeight.Bold)
+                  T("Dein privater Messenger", 14.sp, a = 0.6f)
+                  Spacer(Modifier.height(8.dp))
+                  GlassField(url, { url = it }, "Datenbank-Adresse (https://…supabase.co)")
+                  GlassField(key, { key = it }, "API-Key (anon / public)")
+                  GlassField(name, { name = it }, "Dein Name")
+                  if (err.isNotEmpty()) T(err, 13.sp, a = 0.8f)
+                  GlassButton(
+                      if (busy) "Verbinde…" else "Verbinden", Modifier.fillMaxWidth(),
+                      enabled = !busy && url.isNotBlank() && key.isNotBlank() && name.isNotBlank(), accent = true
+                  ) {
+                      busy = true; err = ""
+                      scope.launch {
+                          try {
+                              Api.url = url.trim(); Api.key = key.trim()
+                              withContext(Dispatchers.IO) { Api.join(name.trim()) }
+                              sp.edit().putString("url", Api.url).putString("key", Api.key).putString("me", name.trim()).apply()
+                              done(name.trim())
+                          } catch (e: Exception) { err = "Fehler: " + (e.message ?: "").take(140) }
+                          busy = false
+                      }
                   }
               }
           }
 
           @Composable
-          fun App() {
+          fun Home(me: String, open: (String) -> Unit, out: () -> Unit) {
               val ctx = LocalContext.current
               val scope = rememberCoroutineScope()
-              var views by remember { mutableStateOf(listOf<ScanView>()) }
-              var model by remember { mutableStateOf<Model?>(null) }
-              var busy by remember { mutableStateOf<String?>(null) }
-              var preset by remember { mutableIntStateOf(0) }
-              var flip by remember { mutableStateOf(false) }
-
-              val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
-                  if (uris.isNotEmpty()) {
-                      busy = "Fotos werden analysiert…"; model = null
-                      scope.launch {
-                          views = withContext(Dispatchers.Default) { uris.take(36).mapNotNull { loadView(ctx, it) } }
-                          busy = null
+              var tab by remember { mutableIntStateOf(0) }
+              var profs by remember { mutableStateOf(listOf<Prof>()) }
+              var calls by remember { mutableStateOf(listOf<Msg>()) }
+              var txt by remember { mutableStateOf("") }
+              LaunchedEffect(Unit) {
+                  while (true) {
+                      try {
+                          profs = withContext(Dispatchers.IO) { Api.profiles() }
+                          calls = withContext(Dispatchers.IO) { Api.calls(me) }
+                      } catch (e: Exception) {}
+                      delay(4000)
+                  }
+              }
+              Column(Modifier.fillMaxSize().systemBarsPadding().padding(16.dp, 8.dp)) {
+                  Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                      Logo(40.dp); Spacer(Modifier.width(12.dp))
+                      Column(Modifier.weight(1f)) { T("Glim", 26.sp, FontWeight.Bold); T("Hi, $me", 12.sp, a = 0.6f) }
+                      Box(Modifier.glass(18.dp, 0.10f).clickable(onClick = out).padding(12.dp, 8.dp)) { T("Abmelden", 12.sp) }
+                  }
+                  Box(Modifier.weight(1f)) {
+                      Crossfade(tab, animationSpec = tween(250), label = "tab") { t ->
+                          when (t) {
+                              0 -> {
+                                  val list = profs.filter { it.name != me }
+                                  if (list.isEmpty()) T("Noch keine Kontakte – andere müssen sich mit derselben Datenbank anmelden.", 14.sp, a = 0.6f)
+                                  LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                      itemsIndexed(list) { i, p ->
+                                          Row(
+                                              Modifier.fillMaxWidth().appear(i * 40).glass(26.dp, 0.12f).clickable { open(p.name) }.padding(14.dp),
+                                              verticalAlignment = Alignment.CenterVertically
+                                          ) {
+                                              Avatar(p.name); Spacer(Modifier.width(14.dp))
+                                              Column {
+                                                  T(p.name, 17.sp, FontWeight.SemiBold)
+                                                  T(p.status.ifEmpty { "Hey, ich nutze Glim" }, 13.sp, a = 0.55f)
+                                              }
+                                          }
+                                      }
+                                  }
+                              }
+                              1 -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                  Column(Modifier.fillMaxWidth().glass(28.dp, 0.12f).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                      T("Mein Status", 16.sp, FontWeight.SemiBold)
+                                      GlassField(txt, { txt = it }, "Was gibt's Neues?")
+                                      GlassButton("Posten", Modifier.fillMaxWidth(), accent = true) {
+                                          scope.launch {
+                                              try { withContext(Dispatchers.IO) { Api.setStatus(me, txt) }; txt = "" } catch (e: Exception) {}
+                                          }
+                                      }
+                                  }
+                                  LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                      itemsIndexed(profs.filter { it.status.isNotBlank() }) { i, p ->
+                                          Row(Modifier.fillMaxWidth().appear(i * 40).glass(24.dp, 0.10f).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                              Avatar(p.name, 44.dp); Spacer(Modifier.width(12.dp))
+                                              Column { T(p.name, 15.sp, FontWeight.SemiBold); T(p.status, 14.sp, a = 0.8f) }
+                                          }
+                                      }
+                                  }
+                              }
+                              else -> {
+                                  if (calls.isEmpty()) T("Noch keine Anrufe.", 14.sp, a = 0.6f)
+                                  LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                      itemsIndexed(calls) { i, m ->
+                                          val other = if (m.from == me) m.to else m.from
+                                          val audio = "startWithVideoMuted" in m.body
+                                          Row(Modifier.fillMaxWidth().appear(i * 40).glass(24.dp, 0.10f).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                              Avatar(other, 44.dp); Spacer(Modifier.width(12.dp))
+                                              Column(Modifier.weight(1f)) {
+                                                  T(other, 16.sp, FontWeight.SemiBold)
+                                                  T((if (m.from == me) "↗ Ausgehend" else "↙ Eingehend") + " · " + (if (audio) "Sprache" else "Video"), 12.sp, a = 0.6f)
+                                              }
+                                              RoundBtn(if (audio) "📞" else "🎥") { openUrl(ctx, m.body) }
+                                          }
+                                      }
+                                  }
+                              }
+                          }
+                      }
+                  }
+                  Spacer(Modifier.height(10.dp))
+                  Row(Modifier.fillMaxWidth().glass(30.dp, 0.12f).padding(6.dp)) {
+                      listOf("💬 Chats", "✨ Status", "📞 Anrufe").forEachIndexed { i, label ->
+                          val sel = tab == i
+                          val bg by animateFloatAsState(if (sel) 0.28f else 0f, spring(stiffness = 300f), label = "nb")
+                          val sc by animateFloatAsState(if (sel) 1.08f else 1f, spring(0.4f, 400f), label = "ns")
+                          Box(
+                              Modifier.weight(1f).graphicsLayer { scaleX = sc; scaleY = sc }
+                                  .clip(RoundedCornerShape(24.dp)).background(Color.White.copy(bg))
+                                  .clickable { tab = i }.padding(vertical = 12.dp),
+                              contentAlignment = Alignment.Center
+                          ) { T(label, 13.sp, FontWeight.SemiBold, if (sel) 1f else 0.6f) }
                       }
                   }
               }
-              fun generate() {
-                  if (views.size < 3) return
-                  busy = "Voxel-Hülle wird berechnet…"
-                  scope.launch {
-                      model = withContext(Dispatchers.Default) { carve(views, PRESETS[preset].n, PRESETS[preset].tol, flip) }
-                      busy = null
+          }
+
+          @Composable
+          fun Bubble(m: Msg, mine: Boolean, onOpen: (String) -> Unit) {
+              val sh = RoundedCornerShape(22.dp, 22.dp, if (mine) 6.dp else 22.dp, if (mine) 22.dp else 6.dp)
+              Row(Modifier.fillMaxWidth().appear(), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
+                  Box(
+                      Modifier.widthIn(max = 290.dp).clip(sh)
+                          .background(
+                              if (mine) Brush.linearGradient(listOf(Color(0xCC22B8E8), Color(0xCC8B5CF6)))
+                              else Brush.verticalGradient(listOf(Color.White.copy(0.18f), Color.White.copy(0.07f)))
+                          )
+                          .border(1.dp, Color.White.copy(0.25f), sh)
+                          .then(if (m.kind == "call") Modifier.clickable { onOpen(m.body) } else Modifier)
+                          .padding(14.dp, 10.dp)
+                  ) {
+                      if (m.kind == "call") Column {
+                          T(if ("startWithVideoMuted" in m.body) "📞 Sprachanruf" else "🎥 Videoanruf", 16.sp, FontWeight.SemiBold)
+                          T("Tippen zum Beitreten", 12.sp, a = 0.7f)
+                      } else T(m.body, 16.sp)
                   }
               }
+          }
 
+          @Composable
+          fun Chat(me: String, other: String, back: () -> Unit) {
+              BackHandler(onBack = back)
+              val ctx = LocalContext.current
+              val scope = rememberCoroutineScope()
+              var msgs by remember { mutableStateOf(listOf<Msg>()) }
+              var txt by remember { mutableStateOf("") }
+              val ls = rememberLazyListState()
+              suspend fun refresh() { try { msgs = withContext(Dispatchers.IO) { Api.chat(me, other) } } catch (e: Exception) {} }
+              LaunchedEffect(Unit) { while (true) { refresh(); delay(2000) } }
+              LaunchedEffect(msgs.size) { if (msgs.isNotEmpty()) ls.animateScrollToItem(msgs.lastIndex) }
+              fun send(body: String, kind: String) {
+                  scope.launch { try { withContext(Dispatchers.IO) { Api.send(me, other, body, kind) }; refresh() } catch (e: Exception) {} }
+              }
+              fun call(video: Boolean) {
+                  val u = "https://meet.jit.si/glim-" + java.util.UUID.randomUUID().toString().take(12) + (if (video) "" else "#config.startWithVideoMuted=true")
+                  send(u, "call"); openUrl(ctx, u)
+              }
+              Column(Modifier.fillMaxSize().systemBarsPadding().imePadding().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                  Row(Modifier.fillMaxWidth().glass(30.dp, 0.12f).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                      RoundBtn("‹", back); Spacer(Modifier.width(10.dp))
+                      Avatar(other, 40.dp); Spacer(Modifier.width(10.dp))
+                      Box(Modifier.weight(1f)) { T(other, 18.sp, FontWeight.SemiBold) }
+                      RoundBtn("📞") { call(false) }; Spacer(Modifier.width(8.dp))
+                      RoundBtn("🎥") { call(true) }
+                  }
+                  LazyColumn(Modifier.weight(1f), state = ls, verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 8.dp)) {
+                      items(msgs, key = { it.id }) { m -> Bubble(m, m.from == me) { openUrl(ctx, it) } }
+                  }
+                  Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                      GlassField(txt, { txt = it }, "Nachricht", Modifier.weight(1f))
+                      Box(
+                          Modifier.size(52.dp).clip(CircleShape)
+                              .background(Brush.linearGradient(listOf(Color(0xFF22D3EE), Color(0xFF8B5CF6))))
+                              .clickable { if (txt.isNotBlank()) { send(txt.trim(), "text"); txt = "" } },
+                          contentAlignment = Alignment.Center
+                      ) { T("➤", 20.sp, FontWeight.Bold) }
+                  }
+              }
+          }
+
+          @Composable
+          fun App(sp: SharedPreferences) {
+              var me by remember { mutableStateOf(sp.getString("me", "") ?: "") }
+              Api.url = sp.getString("url", "") ?: ""; Api.key = sp.getString("key", "") ?: ""
+              var chat by remember { mutableStateOf<String?>(null) }
               Box(Modifier.fillMaxSize()) {
                   Backdrop()
-                  Column(Modifier.fillMaxSize().systemBarsPadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                      Column {
-                          T("Scan3D", 36.sp, FontWeight.Bold)
-                          T("Foto → 3D · reiner Algorithmus, keine KI", 13.sp, a = 0.6f)
-                      }
-                      LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                          itemsIndexed(PRESETS) { i, p -> Chip(p.name, i == preset) { preset = i } }
-                          item { Chip("↺ Richtung", flip) { flip = !flip } }
-                      }
-                      Box(Modifier.weight(1f).fillMaxWidth().glass(34.dp), contentAlignment = Alignment.Center) {
-                          val b = busy; val mm = model
-                          when {
-                              b != null -> Pulse(b)
-                              mm != null && mm.c.isNotEmpty() -> Viewer(mm, Modifier.fillMaxSize())
-                              else -> Box(Modifier.padding(28.dp)) {
-                                  T(
-                                      if (views.isEmpty()) "Wähle 12–24 Fotos rund um das Objekt (in Drehreihenfolge, einfarbiger Hintergrund)."
-                                      else "${views.size} Fotos bereit – tippe auf „3D erzeugen“.", 15.sp, a = 0.75f
-                                  )
-                              }
-                          }
-                      }
-                      AnimatedVisibility(
-                          views.isNotEmpty(),
-                          enter = fadeIn(spring()) + slideInVertically(spring(dampingRatio = 0.6f, stiffness = 300f)) { it / 2 }
-                      ) {
-                          LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                              itemsIndexed(views) { _, v ->
-                                  val sh = RoundedCornerShape(18.dp)
-                                  Image(
-                                      v.bmp.asImageBitmap(), null, contentScale = ContentScale.Crop,
-                                      modifier = Modifier.size(62.dp).clip(sh).border(1.dp, Color.White.copy(0.3f), sh)
-                                  )
-                              }
-                          }
-                      }
-                      Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                          GlassButton("Fotos wählen", Modifier.weight(1f)) { picker.launch("image/*") }
-                          GlassButton("3D erzeugen", Modifier.weight(1f), enabled = views.size >= 3 && busy == null, accent = true) { generate() }
-                      }
+                  if (me.isBlank()) Setup(sp) { me = it }
+                  else AnimatedContent(
+                      chat,
+                      transitionSpec = {
+                          if (targetState != null)
+                              (slideInHorizontally(spring(0.8f, 300f)) { it } + fadeIn()) togetherWith (slideOutHorizontally(spring(0.8f, 300f)) { -it / 4 } + fadeOut())
+                          else
+                              (slideInHorizontally(spring(0.8f, 300f)) { -it / 4 } + fadeIn()) togetherWith (slideOutHorizontally(spring(0.8f, 300f)) { it } + fadeOut())
+                      },
+                      label = "nav"
+                  ) { c ->
+                      if (c == null) Home(me, { chat = it }) { sp.edit().remove("me").apply(); me = "" }
+                      else Chat(me, c) { chat = null }
                   }
               }
           }
@@ -465,7 +546,7 @@ jobs:
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
                   enableEdgeToEdge()
-                  setContent { App() }
+                  setContent { App(getSharedPreferences("glim", 0)) }
               }
           }
           EOF
@@ -475,5 +556,5 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Scan3D-APK
+          name: Glim-APK
           path: app/build/outputs/apk/debug/app-debug.apk

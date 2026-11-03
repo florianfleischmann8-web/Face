@@ -1,560 +1,469 @@
-name: Build Glim APK
-
+name: Build PhoneLink APK
 on:
   push:
   workflow_dispatch:
-
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
-
+          java-version: 17
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.7'
-
-      - name: Projekt schreiben
+          gradle-version: 8.9
+      - name: Projekt erzeugen
         run: |
-          mkdir -p app/src/main/java/com/example/glim app/src/main/res/drawable app/src/main/res/mipmap-anydpi-v26
-
+          mkdir -p app/src/main/java/com/phonelink app/src/main/res/xml app/src/main/res/values app/src/main/assets
           cat > settings.gradle.kts <<'EOF'
-          pluginManagement {
-              repositories { google(); mavenCentral(); gradlePluginPortal() }
-          }
-          dependencyResolutionManagement {
-              repositories { google(); mavenCentral() }
-          }
-          rootProject.name = "Glim"
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement { repositories { google(); mavenCentral() } }
+          rootProject.name = "PhoneLink"
           include(":app")
           EOF
-
           cat > build.gradle.kts <<'EOF'
           plugins {
               id("com.android.application") version "8.5.2" apply false
               id("org.jetbrains.kotlin.android") version "1.9.24" apply false
           }
           EOF
-
-          cat > gradle.properties <<'EOF'
-          android.useAndroidX=true
-          org.gradle.jvmargs=-Xmx3g
-          EOF
-
           cat > app/build.gradle.kts <<'EOF'
-          plugins {
-              id("com.android.application")
-              id("org.jetbrains.kotlin.android")
-          }
+          plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }
           android {
-              namespace = "com.example.glim"
+              namespace = "com.phonelink"
               compileSdk = 34
-              defaultConfig {
-                  applicationId = "com.example.glim"
-                  minSdk = 26
-                  targetSdk = 34
-                  versionCode = 1
-                  versionName = "1.0"
-              }
-              buildFeatures { compose = true }
-              composeOptions { kotlinCompilerExtensionVersion = "1.5.14" }
-              compileOptions {
-                  sourceCompatibility = JavaVersion.VERSION_17
-                  targetCompatibility = JavaVersion.VERSION_17
-              }
+              defaultConfig { applicationId = "com.phonelink"; minSdk = 26; targetSdk = 34; versionCode = 1; versionName = "1.0" }
+              compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
               kotlinOptions { jvmTarget = "17" }
           }
-          dependencies {
-              implementation(platform("androidx.compose:compose-bom:2024.06.00"))
-              implementation("androidx.compose.ui:ui")
-              implementation("androidx.compose.foundation:foundation")
-              implementation("androidx.compose.material3:material3")
-              implementation("androidx.activity:activity-compose:1.9.0")
-          }
           EOF
-
+          cat > app/src/main/res/values/strings.xml <<'EOF'
+          <resources><string name="desc">Erlaubt PhoneLink, dein Handy von deinem iPad aus zu bedienen (tippen, wischen, Tasten, Text).</string></resources>
+          EOF
+          cat > app/src/main/res/xml/accessibility.xml <<'EOF'
+          <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+              android:description="@string/desc"
+              android:accessibilityEventTypes="typeWindowStateChanged"
+              android:accessibilityFeedbackType="feedbackGeneric"
+              android:canPerformGestures="true"
+              android:canRetrieveWindowContent="true"
+              android:notificationTimeout="100" />
+          EOF
           cat > app/src/main/AndroidManifest.xml <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.INTERNET" />
-              <application
-                  android:label="Glim"
-                  android:icon="@mipmap/ic_launcher"
-                  android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
-                  <activity
-                      android:name=".MainActivity"
-                      android:exported="true"
-                      android:windowSoftInputMode="adjustResize">
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <application android:label="PhoneLink" android:theme="@android:style/Theme.Material.NoActionBar" android:usesCleartextTraffic="true">
+                  <activity android:name=".MainActivity" android:exported="true">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
                           <category android:name="android.intent.category.LAUNCHER" />
                       </intent-filter>
                   </activity>
+                  <service android:name=".MirrorService" android:exported="false" android:foregroundServiceType="mediaProjection" />
+                  <service android:name=".ControlService" android:exported="true" android:label="PhoneLink Fernsteuerung"
+                      android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+                      <intent-filter><action android:name="android.accessibilityservice.AccessibilityService" /></intent-filter>
+                      <meta-data android:name="android.accessibilityservice" android:resource="@xml/accessibility" />
+                  </service>
               </application>
           </manifest>
           EOF
+          cat > app/src/main/java/com/phonelink/ControlService.kt <<'EOF'
+          package com.phonelink
 
-          cat > app/src/main/res/drawable/ic_bg.xml <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <shape xmlns:android="http://schemas.android.com/apk/res/android">
-              <gradient android:angle="315" android:startColor="#22D3EE" android:centerColor="#8B5CF6" android:endColor="#EC4899" />
-          </shape>
+          import android.accessibilityservice.AccessibilityService
+          import android.accessibilityservice.GestureDescription
+          import android.graphics.Path
+          import android.os.Bundle
+          import android.view.accessibility.AccessibilityEvent
+          import android.view.accessibility.AccessibilityNodeInfo
+
+          class ControlService : AccessibilityService() {
+              companion object { @Volatile var inst: ControlService? = null }
+              override fun onServiceConnected() { inst = this }
+              override fun onDestroy() { inst = null; super.onDestroy() }
+              override fun onAccessibilityEvent(e: AccessibilityEvent?) {}
+              override fun onInterrupt() {}
+
+              fun gesture(x1: Float, y1: Float, x2: Float, y2: Float, dur: Long) {
+                  val p = Path().apply { moveTo(x1, y1); if (x1 != x2 || y1 != y2) lineTo(x2, y2) }
+                  val g = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(p, 0, maxOf(dur, 1L))).build()
+                  dispatchGesture(g, null, null)
+              }
+              fun key(n: String) {
+                  performGlobalAction(when (n) {
+                      "back" -> GLOBAL_ACTION_BACK
+                      "home" -> GLOBAL_ACTION_HOME
+                      "recents" -> GLOBAL_ACTION_RECENTS
+                      else -> GLOBAL_ACTION_NOTIFICATIONS
+                  })
+              }
+              fun setText(t: String) {
+                  val n = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return
+                  n.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply {
+                      putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, t)
+                  })
+              }
+          }
           EOF
-
-          cat > app/src/main/res/drawable/ic_fg.xml <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="108dp" android:height="108dp"
-              android:viewportWidth="108" android:viewportHeight="108">
-              <group android:scaleX="0.85" android:scaleY="0.85" android:pivotX="54" android:pivotY="54">
-                  <path android:fillColor="#F2FFFFFF"
-                      android:pathData="M30,34h48a10,10 0 0,1 10,10v22a10,10 0 0,1 -10,10h-30l-14,14v-14h-4a10,10 0 0,1 -10,-10v-22a10,10 0 0,1 10,-10z" />
-                  <path android:fillColor="#7C4DFF"
-                      android:pathData="M36,55a4,4 0 1,1 8,0a4,4 0 1,1 -8,0M50,55a4,4 0 1,1 8,0a4,4 0 1,1 -8,0M64,55a4,4 0 1,1 8,0a4,4 0 1,1 -8,0" />
-              </group>
-          </vector>
-          EOF
-
-          cat > app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-              <background android:drawable="@drawable/ic_bg" />
-              <foreground android:drawable="@drawable/ic_fg" />
-          </adaptive-icon>
-          EOF
-
-          cat > app/src/main/java/com/example/glim/MainActivity.kt <<'EOF'
-          package com.example.glim
+          cat > app/src/main/java/com/phonelink/WebServer.kt <<'EOF'
+          package com.phonelink
 
           import android.content.Context
-          import android.content.Intent
-          import android.content.SharedPreferences
-          import android.net.Uri
-          import android.os.Bundle
-          import androidx.activity.ComponentActivity
-          import androidx.activity.compose.BackHandler
-          import androidx.activity.compose.setContent
-          import androidx.activity.enableEdgeToEdge
-          import androidx.compose.animation.*
-          import androidx.compose.animation.core.*
-          import androidx.compose.foundation.*
-          import androidx.compose.foundation.layout.*
-          import androidx.compose.foundation.lazy.LazyColumn
-          import androidx.compose.foundation.lazy.items
-          import androidx.compose.foundation.lazy.itemsIndexed
-          import androidx.compose.foundation.lazy.rememberLazyListState
-          import androidx.compose.foundation.interaction.MutableInteractionSource
-          import androidx.compose.foundation.interaction.collectIsPressedAsState
-          import androidx.compose.foundation.shape.CircleShape
-          import androidx.compose.foundation.shape.RoundedCornerShape
-          import androidx.compose.foundation.text.BasicTextField
-          import androidx.compose.material3.Text
-          import androidx.compose.runtime.*
-          import androidx.compose.ui.Alignment
-          import androidx.compose.ui.Modifier
-          import androidx.compose.ui.draw.clip
-          import androidx.compose.ui.geometry.*
-          import androidx.compose.ui.graphics.*
-          import androidx.compose.ui.platform.LocalContext
-          import androidx.compose.ui.text.TextStyle
-          import androidx.compose.ui.text.font.FontWeight
-          import androidx.compose.ui.unit.*
-          import kotlinx.coroutines.*
-          import org.json.JSONArray
-          import org.json.JSONObject
-          import java.net.HttpURLConnection
-          import java.net.URL
-          import java.time.Instant
-          import kotlin.math.abs
+          import java.io.OutputStream
+          import java.net.InetSocketAddress
+          import java.net.ServerSocket
+          import java.net.Socket
+          import java.net.URLDecoder
+          import kotlin.concurrent.thread
 
-          class Msg(val id: Long, val from: String, val to: String, val body: String, val kind: String)
-          class Prof(val name: String, val status: String)
+          object Shared {
+              val pin = (100000..999999).random().toString()
+              @Volatile var running = false
+              @Volatile var w = 0
+              @Volatile var h = 0
+              @Volatile var frame: ByteArray? = null
+              @Volatile var seq = 0L
+          }
 
-          // ---------- Datenbank (Supabase / PostgREST über HTTPS) ----------
-          object Api {
-              var url = ""; var key = ""
-              fun call(method: String, path: String, body: String? = null): String {
-                  val c = URL("${url.trimEnd('/')}/rest/v1/$path").openConnection() as HttpURLConnection
-                  c.requestMethod = method; c.connectTimeout = 8000; c.readTimeout = 8000
-                  c.setRequestProperty("apikey", key)
-                  c.setRequestProperty("Authorization", "Bearer $key")
-                  c.setRequestProperty("Content-Type", "application/json")
-                  c.setRequestProperty("Prefer", "resolution=merge-duplicates,return=minimal")
-                  if (body != null) { c.doOutput = true; c.outputStream.use { it.write(body.toByteArray()) } }
-                  val code = c.responseCode
-                  val s = (if (code < 400) c.inputStream else c.errorStream)?.bufferedReader()?.readText() ?: ""
-                  if (code >= 400) throw Exception("$code $s")
-                  return s
-              }
-              fun profiles(): List<Prof> {
-                  val a = JSONArray(call("GET", "profiles?select=*&order=name"))
-                  return (0 until a.length()).map { val o = a.getJSONObject(it); Prof(o.getString("name"), o.optString("status", "")) }
-              }
-              fun join(name: String) { call("POST", "profiles", JSONObject().put("name", name).toString()) }
-              fun setStatus(name: String, s: String) {
-                  call("POST", "profiles", JSONObject().put("name", name).put("status", s).put("status_at", Instant.now().toString()).toString())
-              }
-              fun send(from: String, to: String, body: String, kind: String) {
-                  call("POST", "messages", JSONObject().put("sender", from).put("receiver", to).put("body", body).put("kind", kind).toString())
-              }
-              private fun msgs(j: String): List<Msg> {
-                  val a = JSONArray(j)
-                  return (0 until a.length()).map {
-                      val o = a.getJSONObject(it)
-                      Msg(o.getLong("id"), o.getString("sender"), o.getString("receiver"), o.optString("body"), o.optString("kind", "text"))
+          class WebServer(private val ctx: Context) {
+              private var ss: ServerSocket? = null
+
+              fun start() {
+                  ss = ServerSocket().apply { reuseAddress = true; bind(InetSocketAddress(8080)) }
+                  thread(isDaemon = true) {
+                      try { while (true) { val s = ss!!.accept(); thread(isDaemon = true) { handle(s) } } } catch (e: Exception) {}
                   }
               }
-              fun chat(me: String, o: String): List<Msg> {
-                  val m = Uri.encode(me); val x = Uri.encode(o)
-                  return msgs(call("GET", "messages?select=*&order=id.asc&limit=300&or=(and(sender.eq.$m,receiver.eq.$x),and(sender.eq.$x,receiver.eq.$m))"))
+              fun stop() { try { ss?.close() } catch (e: Exception) {} }
+
+              private fun resp(o: OutputStream, code: Int, type: String, b: ByteArray) {
+                  o.write("HTTP/1.1 $code OK\r\nContent-Type: $type\r\nContent-Length: ${b.size}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n".toByteArray())
+                  o.write(b); o.flush()
               }
-              fun calls(me: String): List<Msg> {
-                  val m = Uri.encode(me)
-                  return msgs(call("GET", "messages?select=*&kind=eq.call&order=id.desc&limit=40&or=(sender.eq.$m,receiver.eq.$m)"))
-              }
-          }
 
-          fun openUrl(ctx: Context, u: String) {
-              try { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(u)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (e: Exception) {}
-          }
-
-          // ---------- Design-Bausteine ----------
-          fun Modifier.glass(r: Dp = 28.dp, a: Float = 0.12f): Modifier {
-              val sh = RoundedCornerShape(r)
-              return this.clip(sh)
-                  .background(Brush.verticalGradient(listOf(Color.White.copy(a + 0.10f), Color.White.copy(a * 0.5f))))
-                  .border(1.dp, Brush.linearGradient(listOf(Color.White.copy(0.75f), Color.White.copy(0.05f), Color.White.copy(0.35f))), sh)
-          }
-
-          @Composable
-          fun Modifier.appear(d: Int = 0): Modifier {
-              val a = remember { Animatable(0f) }
-              LaunchedEffect(Unit) { delay(d.toLong()); a.animateTo(1f, spring(0.7f, 200f)) }
-              return graphicsLayer { alpha = a.value.coerceIn(0f, 1f); translationY = (1f - a.value) * 40f }
-          }
-
-          @Composable
-          fun T(s: String, size: TextUnit, w: FontWeight = FontWeight.Normal, a: Float = 1f) =
-              Text(s, color = Color.White.copy(a), fontSize = size, fontWeight = w)
-
-          @Composable
-          fun Backdrop() {
-              val t by rememberInfiniteTransition(label = "bg").animateFloat(
-                  0f, 6.2832f, infiniteRepeatable(tween(18000, easing = LinearEasing)), label = "p")
-              Canvas(Modifier.fillMaxSize()) {
-                  drawRect(Brush.verticalGradient(listOf(Color(0xFF070B1A), Color(0xFF140A2E))))
-                  val w = size.width; val h = size.height
-                  fun blob(c: Color, fx: Float, fy: Float, ph: Float, r: Float) {
-                      val ctr = Offset(w * (fx + 0.12f * kotlin.math.sin(t + ph)), h * (fy + 0.08f * kotlin.math.cos(t * 1.3f + ph)))
-                      drawCircle(Brush.radialGradient(listOf(c, Color.Transparent), ctr, r), r, ctr)
-                  }
-                  blob(Color(0xCC22D3EE), .15f, .15f, 0f, w * .75f)
-                  blob(Color(0xCC8B5CF6), .9f, .5f, 2f, w * .85f)
-                  blob(Color(0xCCEC4899), .25f, .88f, 4f, w * .75f)
-              }
-          }
-
-          @Composable
-          fun Logo(s: Dp) {
-              val t by rememberInfiniteTransition(label = "l").animateFloat(
-                  0f, 1f, infiniteRepeatable(tween(2600, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "f")
-              Canvas(Modifier.size(s).graphicsLayer { translationY = (t - 0.5f) * s.toPx() * 0.06f; rotationZ = (t - 0.5f) * 4f }) {
-                  val w = size.width
-                  drawRoundRect(Brush.linearGradient(listOf(Color(0xFF22D3EE), Color(0xFF8B5CF6), Color(0xFFEC4899))), cornerRadius = CornerRadius(w * .3f))
-                  val p = Path().apply {
-                      addRoundRect(RoundRect(w * .2f, w * .24f, w * .8f, w * .64f, w * .14f, w * .14f))
-                      moveTo(w * .34f, w * .6f); lineTo(w * .30f, w * .8f); lineTo(w * .52f, w * .62f); close()
-                  }
-                  drawPath(p, Color.White.copy(0.95f))
-                  for (i in 0..2) drawCircle(Color(0xFF7C4DFF), w * .04f, Offset(w * (.36f + .14f * i), w * .44f))
-              }
-          }
-
-          @Composable
-          fun Avatar(name: String, s: Dp = 48.dp) {
-              val h = abs(name.hashCode())
-              val a = Color.hsv((h % 360).toFloat(), 0.55f, 1f); val b = Color.hsv(((h / 7) % 360).toFloat(), 0.7f, 0.85f)
-              Box(Modifier.size(s).clip(CircleShape).background(Brush.linearGradient(listOf(a, b))), contentAlignment = Alignment.Center) {
-                  T(name.take(1).uppercase(), (s.value * 0.42f).sp, FontWeight.Bold)
-              }
-          }
-
-          @Composable
-          fun GlassButton(text: String, modifier: Modifier = Modifier, enabled: Boolean = true, accent: Boolean = false, onClick: () -> Unit) {
-              val src = remember { MutableInteractionSource() }
-              val pressed by src.collectIsPressedAsState()
-              val sc by animateFloatAsState(if (pressed) 0.93f else 1f, spring(0.4f, 500f), label = "s")
-              Box(
-                  modifier.graphicsLayer { scaleX = sc; scaleY = sc; alpha = if (enabled) 1f else 0.4f }
-                      .glass(26.dp, if (accent) 0.22f else 0.12f)
-                      .then(if (accent) Modifier.background(Brush.linearGradient(listOf(Color(0x5522D3EE), Color(0x558B5CF6)))) else Modifier)
-                      .clickable(interactionSource = src, indication = null, enabled = enabled, onClick = onClick)
-                      .padding(vertical = 16.dp, horizontal = 18.dp),
-                  contentAlignment = Alignment.Center
-              ) { T(text, 16.sp, FontWeight.SemiBold) }
-          }
-
-          @Composable
-          fun RoundBtn(text: String, onClick: () -> Unit) {
-              Box(Modifier.size(44.dp).glass(22.dp, 0.14f).clickable(onClick = onClick), contentAlignment = Alignment.Center) { T(text, 18.sp) }
-          }
-
-          @Composable
-          fun GlassField(v: String, on: (String) -> Unit, hint: String, modifier: Modifier = Modifier.fillMaxWidth()) {
-              BasicTextField(
-                  v, on, singleLine = true,
-                  textStyle = TextStyle(color = Color.White, fontSize = 16.sp),
-                  cursorBrush = SolidColor(Color.White),
-                  modifier = modifier.glass(22.dp, 0.10f).padding(16.dp),
-                  decorationBox = { inner -> Box { if (v.isEmpty()) T(hint, 16.sp, a = 0.4f); inner() } }
-              )
-          }
-
-          // ---------- Screens ----------
-          @Composable
-          fun Setup(sp: SharedPreferences, done: (String) -> Unit) {
-              var url by remember { mutableStateOf(sp.getString("url", "") ?: "") }
-              var key by remember { mutableStateOf(sp.getString("key", "") ?: "") }
-              var name by remember { mutableStateOf("") }
-              var err by remember { mutableStateOf("") }
-              var busy by remember { mutableStateOf(false) }
-              val scope = rememberCoroutineScope()
-              Column(
-                  Modifier.fillMaxSize().systemBarsPadding().imePadding().verticalScroll(rememberScrollState()).padding(24.dp),
-                  horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)
-              ) {
-                  Spacer(Modifier.height(24.dp))
-                  Logo(96.dp)
-                  T("Glim", 40.sp, FontWeight.Bold)
-                  T("Dein privater Messenger", 14.sp, a = 0.6f)
-                  Spacer(Modifier.height(8.dp))
-                  GlassField(url, { url = it }, "Datenbank-Adresse (https://…supabase.co)")
-                  GlassField(key, { key = it }, "API-Key (anon / public)")
-                  GlassField(name, { name = it }, "Dein Name")
-                  if (err.isNotEmpty()) T(err, 13.sp, a = 0.8f)
-                  GlassButton(
-                      if (busy) "Verbinde…" else "Verbinden", Modifier.fillMaxWidth(),
-                      enabled = !busy && url.isNotBlank() && key.isNotBlank() && name.isNotBlank(), accent = true
-                  ) {
-                      busy = true; err = ""
-                      scope.launch {
-                          try {
-                              Api.url = url.trim(); Api.key = key.trim()
-                              withContext(Dispatchers.IO) { Api.join(name.trim()) }
-                              sp.edit().putString("url", Api.url).putString("key", Api.key).putString("me", name.trim()).apply()
-                              done(name.trim())
-                          } catch (e: Exception) { err = "Fehler: " + (e.message ?: "").take(140) }
-                          busy = false
-                      }
-                  }
-              }
-          }
-
-          @Composable
-          fun Home(me: String, open: (String) -> Unit, out: () -> Unit) {
-              val ctx = LocalContext.current
-              val scope = rememberCoroutineScope()
-              var tab by remember { mutableIntStateOf(0) }
-              var profs by remember { mutableStateOf(listOf<Prof>()) }
-              var calls by remember { mutableStateOf(listOf<Msg>()) }
-              var txt by remember { mutableStateOf("") }
-              LaunchedEffect(Unit) {
-                  while (true) {
-                      try {
-                          profs = withContext(Dispatchers.IO) { Api.profiles() }
-                          calls = withContext(Dispatchers.IO) { Api.calls(me) }
-                      } catch (e: Exception) {}
-                      delay(4000)
-                  }
-              }
-              Column(Modifier.fillMaxSize().systemBarsPadding().padding(16.dp, 8.dp)) {
-                  Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                      Logo(40.dp); Spacer(Modifier.width(12.dp))
-                      Column(Modifier.weight(1f)) { T("Glim", 26.sp, FontWeight.Bold); T("Hi, $me", 12.sp, a = 0.6f) }
-                      Box(Modifier.glass(18.dp, 0.10f).clickable(onClick = out).padding(12.dp, 8.dp)) { T("Abmelden", 12.sp) }
-                  }
-                  Box(Modifier.weight(1f)) {
-                      Crossfade(tab, animationSpec = tween(250), label = "tab") { t ->
-                          when (t) {
-                              0 -> {
-                                  val list = profs.filter { it.name != me }
-                                  if (list.isEmpty()) T("Noch keine Kontakte – andere müssen sich mit derselben Datenbank anmelden.", 14.sp, a = 0.6f)
-                                  LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                      itemsIndexed(list) { i, p ->
-                                          Row(
-                                              Modifier.fillMaxWidth().appear(i * 40).glass(26.dp, 0.12f).clickable { open(p.name) }.padding(14.dp),
-                                              verticalAlignment = Alignment.CenterVertically
-                                          ) {
-                                              Avatar(p.name); Spacer(Modifier.width(14.dp))
-                                              Column {
-                                                  T(p.name, 17.sp, FontWeight.SemiBold)
-                                                  T(p.status.ifEmpty { "Hey, ich nutze Glim" }, 13.sp, a = 0.55f)
-                                              }
-                                          }
-                                      }
-                                  }
-                              }
-                              1 -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                  Column(Modifier.fillMaxWidth().glass(28.dp, 0.12f).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                      T("Mein Status", 16.sp, FontWeight.SemiBold)
-                                      GlassField(txt, { txt = it }, "Was gibt's Neues?")
-                                      GlassButton("Posten", Modifier.fillMaxWidth(), accent = true) {
-                                          scope.launch {
-                                              try { withContext(Dispatchers.IO) { Api.setStatus(me, txt) }; txt = "" } catch (e: Exception) {}
-                                          }
-                                      }
-                                  }
-                                  LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                      itemsIndexed(profs.filter { it.status.isNotBlank() }) { i, p ->
-                                          Row(Modifier.fillMaxWidth().appear(i * 40).glass(24.dp, 0.10f).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                                              Avatar(p.name, 44.dp); Spacer(Modifier.width(12.dp))
-                                              Column { T(p.name, 15.sp, FontWeight.SemiBold); T(p.status, 14.sp, a = 0.8f) }
-                                          }
-                                      }
-                                  }
-                              }
-                              else -> {
-                                  if (calls.isEmpty()) T("Noch keine Anrufe.", 14.sp, a = 0.6f)
-                                  LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                      itemsIndexed(calls) { i, m ->
-                                          val other = if (m.from == me) m.to else m.from
-                                          val audio = "startWithVideoMuted" in m.body
-                                          Row(Modifier.fillMaxWidth().appear(i * 40).glass(24.dp, 0.10f).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                                              Avatar(other, 44.dp); Spacer(Modifier.width(12.dp))
-                                              Column(Modifier.weight(1f)) {
-                                                  T(other, 16.sp, FontWeight.SemiBold)
-                                                  T((if (m.from == me) "↗ Ausgehend" else "↙ Eingehend") + " · " + (if (audio) "Sprache" else "Video"), 12.sp, a = 0.6f)
-                                              }
-                                              RoundBtn(if (audio) "📞" else "🎥") { openUrl(ctx, m.body) }
-                                          }
-                                      }
-                                  }
-                              }
+              private fun handle(sock: Socket) {
+                  try {
+                      sock.use {
+                          val inp = it.getInputStream().bufferedReader(Charsets.ISO_8859_1)
+                          val line = inp.readLine() ?: return
+                          while (true) { val h = inp.readLine(); if (h.isNullOrEmpty()) break }
+                          val target = line.split(" ").getOrElse(1) { "/" }
+                          val path = target.substringBefore("?")
+                          val q = HashMap<String, String>()
+                          target.substringAfter("?", "").split("&").forEach { p ->
+                              val kv = p.split("=", limit = 2)
+                              if (kv.size == 2) q[kv[0]] = URLDecoder.decode(kv[1], "UTF-8")
                           }
+                          val out = it.getOutputStream()
+                          if (path == "/") { resp(out, 200, "text/html; charset=utf-8", ctx.assets.open("index.html").readBytes()); return }
+                          if (q["k"] != Shared.pin) { resp(out, 403, "text/plain", "PIN falsch".toByteArray()); return }
+                          val c = ControlService.inst
+                          val W = Shared.w.toFloat(); val H = Shared.h.toFloat()
+                          fun f(n: String) = q[n]?.toFloatOrNull() ?: 0f
+                          when (path) {
+                              "/stream" -> { stream(out); return }
+                              "/info" -> { resp(out, 200, "application/json", "{\"w\":${Shared.w},\"h\":${Shared.h},\"ctl\":${c != null}}".toByteArray()); return }
+                              "/tap" -> c?.gesture(f("x") * W, f("y") * H, f("x") * W, f("y") * H, 40)
+                              "/long" -> c?.gesture(f("x") * W, f("y") * H, f("x") * W, f("y") * H, 700)
+                              "/swipe" -> c?.gesture(f("x1") * W, f("y1") * H, f("x2") * W, f("y2") * H, q["d"]?.toLongOrNull() ?: 250)
+                              "/key" -> c?.key(q["name"] ?: "")
+                              "/text" -> c?.setText(q["t"] ?: "")
+                          }
+                          resp(out, 200, "text/plain", "ok".toByteArray())
                       }
-                  }
-                  Spacer(Modifier.height(10.dp))
-                  Row(Modifier.fillMaxWidth().glass(30.dp, 0.12f).padding(6.dp)) {
-                      listOf("💬 Chats", "✨ Status", "📞 Anrufe").forEachIndexed { i, label ->
-                          val sel = tab == i
-                          val bg by animateFloatAsState(if (sel) 0.28f else 0f, spring(stiffness = 300f), label = "nb")
-                          val sc by animateFloatAsState(if (sel) 1.08f else 1f, spring(0.4f, 400f), label = "ns")
-                          Box(
-                              Modifier.weight(1f).graphicsLayer { scaleX = sc; scaleY = sc }
-                                  .clip(RoundedCornerShape(24.dp)).background(Color.White.copy(bg))
-                                  .clickable { tab = i }.padding(vertical = 12.dp),
-                              contentAlignment = Alignment.Center
-                          ) { T(label, 13.sp, FontWeight.SemiBold, if (sel) 1f else 0.6f) }
-                      }
-                  }
+                  } catch (e: Exception) {}
               }
-          }
 
-          @Composable
-          fun Bubble(m: Msg, mine: Boolean, onOpen: (String) -> Unit) {
-              val sh = RoundedCornerShape(22.dp, 22.dp, if (mine) 6.dp else 22.dp, if (mine) 22.dp else 6.dp)
-              Row(Modifier.fillMaxWidth().appear(), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
-                  Box(
-                      Modifier.widthIn(max = 290.dp).clip(sh)
-                          .background(
-                              if (mine) Brush.linearGradient(listOf(Color(0xCC22B8E8), Color(0xCC8B5CF6)))
-                              else Brush.verticalGradient(listOf(Color.White.copy(0.18f), Color.White.copy(0.07f)))
-                          )
-                          .border(1.dp, Color.White.copy(0.25f), sh)
-                          .then(if (m.kind == "call") Modifier.clickable { onOpen(m.body) } else Modifier)
-                          .padding(14.dp, 10.dp)
-                  ) {
-                      if (m.kind == "call") Column {
-                          T(if ("startWithVideoMuted" in m.body) "📞 Sprachanruf" else "🎥 Videoanruf", 16.sp, FontWeight.SemiBold)
-                          T("Tippen zum Beitreten", 12.sp, a = 0.7f)
-                      } else T(m.body, 16.sp)
+              private fun stream(out: OutputStream) {
+                  out.write("HTTP/1.1 200 OK\r\nContent-Type: multipart/x-mixed-replace; boundary=f\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n".toByteArray())
+                  var last = -1L
+                  while (Shared.running) {
+                      val f = Shared.frame; val s = Shared.seq
+                      if (f != null && s != last) {
+                          last = s
+                          out.write("--f\r\nContent-Type: image/jpeg\r\nContent-Length: ${f.size}\r\n\r\n".toByteArray())
+                          out.write(f); out.write("\r\n".toByteArray()); out.flush()
+                      } else Thread.sleep(20)
                   }
-              }
-          }
-
-          @Composable
-          fun Chat(me: String, other: String, back: () -> Unit) {
-              BackHandler(onBack = back)
-              val ctx = LocalContext.current
-              val scope = rememberCoroutineScope()
-              var msgs by remember { mutableStateOf(listOf<Msg>()) }
-              var txt by remember { mutableStateOf("") }
-              val ls = rememberLazyListState()
-              suspend fun refresh() { try { msgs = withContext(Dispatchers.IO) { Api.chat(me, other) } } catch (e: Exception) {} }
-              LaunchedEffect(Unit) { while (true) { refresh(); delay(2000) } }
-              LaunchedEffect(msgs.size) { if (msgs.isNotEmpty()) ls.animateScrollToItem(msgs.lastIndex) }
-              fun send(body: String, kind: String) {
-                  scope.launch { try { withContext(Dispatchers.IO) { Api.send(me, other, body, kind) }; refresh() } catch (e: Exception) {} }
-              }
-              fun call(video: Boolean) {
-                  val u = "https://meet.jit.si/glim-" + java.util.UUID.randomUUID().toString().take(12) + (if (video) "" else "#config.startWithVideoMuted=true")
-                  send(u, "call"); openUrl(ctx, u)
-              }
-              Column(Modifier.fillMaxSize().systemBarsPadding().imePadding().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                  Row(Modifier.fillMaxWidth().glass(30.dp, 0.12f).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                      RoundBtn("‹", back); Spacer(Modifier.width(10.dp))
-                      Avatar(other, 40.dp); Spacer(Modifier.width(10.dp))
-                      Box(Modifier.weight(1f)) { T(other, 18.sp, FontWeight.SemiBold) }
-                      RoundBtn("📞") { call(false) }; Spacer(Modifier.width(8.dp))
-                      RoundBtn("🎥") { call(true) }
-                  }
-                  LazyColumn(Modifier.weight(1f), state = ls, verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 8.dp)) {
-                      items(msgs, key = { it.id }) { m -> Bubble(m, m.from == me) { openUrl(ctx, it) } }
-                  }
-                  Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                      GlassField(txt, { txt = it }, "Nachricht", Modifier.weight(1f))
-                      Box(
-                          Modifier.size(52.dp).clip(CircleShape)
-                              .background(Brush.linearGradient(listOf(Color(0xFF22D3EE), Color(0xFF8B5CF6))))
-                              .clickable { if (txt.isNotBlank()) { send(txt.trim(), "text"); txt = "" } },
-                          contentAlignment = Alignment.Center
-                      ) { T("➤", 20.sp, FontWeight.Bold) }
-                  }
-              }
-          }
-
-          @Composable
-          fun App(sp: SharedPreferences) {
-              var me by remember { mutableStateOf(sp.getString("me", "") ?: "") }
-              Api.url = sp.getString("url", "") ?: ""; Api.key = sp.getString("key", "") ?: ""
-              var chat by remember { mutableStateOf<String?>(null) }
-              Box(Modifier.fillMaxSize()) {
-                  Backdrop()
-                  if (me.isBlank()) Setup(sp) { me = it }
-                  else AnimatedContent(
-                      chat,
-                      transitionSpec = {
-                          if (targetState != null)
-                              (slideInHorizontally(spring(0.8f, 300f)) { it } + fadeIn()) togetherWith (slideOutHorizontally(spring(0.8f, 300f)) { -it / 4 } + fadeOut())
-                          else
-                              (slideInHorizontally(spring(0.8f, 300f)) { -it / 4 } + fadeIn()) togetherWith (slideOutHorizontally(spring(0.8f, 300f)) { it } + fadeOut())
-                      },
-                      label = "nav"
-                  ) { c ->
-                      if (c == null) Home(me, { chat = it }) { sp.edit().remove("me").apply(); me = "" }
-                      else Chat(me, c) { chat = null }
-                  }
-              }
-          }
-
-          class MainActivity : ComponentActivity() {
-              override fun onCreate(savedInstanceState: Bundle?) {
-                  super.onCreate(savedInstanceState)
-                  enableEdgeToEdge()
-                  setContent { App(getSharedPreferences("glim", 0)) }
               }
           }
           EOF
+          cat > app/src/main/java/com/phonelink/MirrorService.kt <<'EOF'
+          package com.phonelink
 
+          import android.app.*
+          import android.content.Intent
+          import android.content.pm.ServiceInfo
+          import android.graphics.Bitmap
+          import android.graphics.PixelFormat
+          import android.hardware.display.DisplayManager
+          import android.hardware.display.VirtualDisplay
+          import android.media.ImageReader
+          import android.media.projection.MediaProjection
+          import android.media.projection.MediaProjectionManager
+          import android.os.*
+          import android.util.DisplayMetrics
+          import android.view.WindowManager
+          import java.io.ByteArrayOutputStream
+
+          @Suppress("DEPRECATION")
+          class MirrorService : Service() {
+              private var mp: MediaProjection? = null
+              private var vd: VirtualDisplay? = null
+              private var ir: ImageReader? = null
+              private var ht: HandlerThread? = null
+              private var server: WebServer? = null
+
+              override fun onBind(i: Intent?): IBinder? = null
+
+              override fun onStartCommand(i: Intent?, fl: Int, id: Int): Int {
+                  getSystemService(NotificationManager::class.java)
+                      .createNotificationChannel(NotificationChannel("pl", "PhoneLink", NotificationManager.IMPORTANCE_LOW))
+                  val n = Notification.Builder(this, "pl").setContentTitle("PhoneLink läuft")
+                      .setContentText("Dein Handy ist im WLAN erreichbar").setSmallIcon(android.R.drawable.ic_menu_share).build()
+                  startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+                  val data = i?.getParcelableExtra<Intent>("data")
+                  if (data == null) { stopSelf(); return START_NOT_STICKY }
+                  mp = (getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager)
+                      .getMediaProjection(i.getIntExtra("code", 0), data)
+                  mp!!.registerCallback(object : MediaProjection.Callback() { override fun onStop() { stopSelf() } }, Handler(Looper.getMainLooper()))
+                  val dm = DisplayMetrics()
+                  (getSystemService(WINDOW_SERVICE) as WindowManager).defaultDisplay.getRealMetrics(dm)
+                  Shared.w = dm.widthPixels; Shared.h = dm.heightPixels
+                  val w = (minOf(720, dm.widthPixels) / 2) * 2
+                  val h = ((dm.heightPixels * w / dm.widthPixels) / 2) * 2
+                  ht = HandlerThread("pl").also { it.start() }
+                  ir = ImageReader.newInstance(w, h, PixelFormat.RGBA_8888, 2)
+                  vd = mp!!.createVirtualDisplay("pl", w, h, dm.densityDpi, DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, ir!!.surface, null, null)
+                  var last = 0L
+                  ir!!.setOnImageAvailableListener({ r ->
+                      val img = r.acquireLatestImage() ?: return@setOnImageAvailableListener
+                      try {
+                          val now = SystemClock.uptimeMillis()
+                          if (now - last >= 70) {
+                              last = now
+                              val p = img.planes[0]
+                              val bmp = Bitmap.createBitmap(p.rowStride / p.pixelStride, img.height, Bitmap.Config.ARGB_8888)
+                              bmp.copyPixelsFromBuffer(p.buffer)
+                              val bo = ByteArrayOutputStream()
+                              Bitmap.createBitmap(bmp, 0, 0, img.width, img.height).compress(Bitmap.CompressFormat.JPEG, 60, bo)
+                              bmp.recycle()
+                              Shared.frame = bo.toByteArray(); Shared.seq++
+                          }
+                      } finally { img.close() }
+                  }, Handler(ht!!.looper))
+                  Shared.running = true
+                  server = WebServer(this).also { it.start() }
+                  return START_NOT_STICKY
+              }
+
+              override fun onDestroy() {
+                  Shared.running = false; Shared.frame = null
+                  vd?.release(); ir?.close(); mp?.stop(); server?.stop(); ht?.quit()
+                  super.onDestroy()
+              }
+          }
+          EOF
+          cat > app/src/main/java/com/phonelink/MainActivity.kt <<'EOF'
+          package com.phonelink
+
+          import android.app.Activity
+          import android.content.Intent
+          import android.graphics.Color
+          import android.graphics.Typeface
+          import android.graphics.drawable.GradientDrawable
+          import android.media.projection.MediaProjectionManager
+          import android.os.Build
+          import android.os.Bundle
+          import android.provider.Settings
+          import android.widget.*
+          import java.net.Inet4Address
+          import java.net.NetworkInterface
+
+          @Suppress("DEPRECATION")
+          class MainActivity : Activity() {
+              private lateinit var url: TextView
+              private lateinit var b1: Button
+              private lateinit var b2: Button
+              private val gray = 0xFF86A0AE.toInt()
+              private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+              private fun bg(c: Int, r: Int) = GradientDrawable().apply { setColor(c); cornerRadius = dp(r).toFloat() }
+              private fun tv(t: String, sp: Float, c: Int, bold: Boolean = false) = TextView(this).apply {
+                  text = t; textSize = sp; setTextColor(c); if (bold) typeface = Typeface.DEFAULT_BOLD
+              }
+              private fun btn(c: Int, f: () -> Unit) = Button(this).apply {
+                  isAllCaps = false; textSize = 16f; setTextColor(Color.WHITE); background = bg(c, 18)
+                  setOnClickListener { f() }
+                  layoutParams = LinearLayout.LayoutParams(-1, dp(56)).apply { topMargin = dp(12) }
+              }
+
+              override fun onCreate(s: Bundle?) {
+                  super.onCreate(s)
+                  window.statusBarColor = 0xFF0D1B24.toInt(); window.navigationBarColor = 0xFF0D1B24.toInt()
+                  if (Build.VERSION.SDK_INT >= 33) requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 1)
+                  val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(22), dp(48), dp(22), dp(22)) }
+                  col.addView(tv("PhoneLink", 32f, Color.WHITE, true))
+                  col.addView(tv("Dein Handy im Browser deines iPads", 15f, gray))
+                  val card = LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL; background = bg(0xFF16293A.toInt(), 24)
+                      setPadding(dp(20), dp(18), dp(20), dp(18))
+                      layoutParams = LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(24) }
+                  }
+                  card.addView(tv("Öffne am iPad in Safari", 13f, gray))
+                  url = tv("", 20f, 0xFFFFB84D.toInt(), true).apply { typeface = Typeface.MONOSPACE }
+                  card.addView(url)
+                  card.addView(tv("PIN", 13f, gray).apply { setPadding(0, dp(14), 0, 0) })
+                  card.addView(tv(Shared.pin, 34f, 0xFF5CE1C6.toInt(), true).apply { letterSpacing = 0.2f })
+                  col.addView(card)
+                  b1 = btn(0xFF3B6EF5.toInt()) { toggle() }
+                  b2 = btn(0xFF22394D.toInt()) { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+                  col.addView(b1); col.addView(b2)
+                  col.addView(tv("Für die Fernsteuerung: Einstellungen → Apps → PhoneLink → ⋮ → „Eingeschränkte Einstellungen zulassen“. Danach unter Bedienungshilfen → Installierte Apps → PhoneLink einschalten.", 13f, gray).apply { setPadding(0, dp(16), 0, 0) })
+                  setContentView(ScrollView(this).apply { setBackgroundColor(0xFF0D1B24.toInt()); addView(col) })
+              }
+
+              private fun toggle() {
+                  if (Shared.running) { stopService(Intent(this, MirrorService::class.java)); b1.postDelayed({ refresh() }, 500) }
+                  else startActivityForResult((getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager).createScreenCaptureIntent(), 42)
+              }
+
+              override fun onActivityResult(rq: Int, rc: Int, d: Intent?) {
+                  if (rq == 42 && rc == RESULT_OK && d != null) {
+                      startForegroundService(Intent(this, MirrorService::class.java).putExtra("code", rc).putExtra("data", d))
+                      b1.postDelayed({ refresh() }, 700)
+                  }
+              }
+
+              override fun onResume() { super.onResume(); refresh() }
+
+              private fun refresh() {
+                  url.text = if (Shared.running) "http://${ip()}:8080" else "Spiegelung ist aus"
+                  b1.text = if (Shared.running) "Spiegelung stoppen" else "Spiegelung starten"
+                  b2.text = if (ControlService.inst != null) "Fernsteuerung aktiv ✓" else "Fernsteuerung aktivieren"
+              }
+
+              private fun ip(): String {
+                  try {
+                      for (n in NetworkInterface.getNetworkInterfaces()) for (a in n.inetAddresses)
+                          if (!a.isLoopbackAddress && a is Inet4Address && a.isSiteLocalAddress) return a.hostAddress ?: ""
+                  } catch (e: Exception) {}
+                  return "kein WLAN"
+              }
+          }
+          EOF
+          cat > app/src/main/assets/index.html <<'EOF'
+          <!doctype html>
+          <html lang="de"><head><meta charset="utf-8">
+          <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+          <meta name="apple-mobile-web-app-capable" content="yes">
+          <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+          <meta name="theme-color" content="#0D1B24">
+          <title>PhoneLink</title>
+          <style>
+          :root{--bg:#0D1B24;--glass:rgba(255,255,255,.06);--line:rgba(255,255,255,.13);--ink:#EAF2F5;--mute:#86A0AE;--amber:#FFB84D;--mint:#5CE1C6;--bad:#FF7A8A}
+          *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+          html,body{height:100%;margin:0;overflow:hidden}
+          body{background:radial-gradient(70% 55% at 12% 8%,rgba(59,110,245,.28),transparent 62%),radial-gradient(55% 50% at 92% 95%,rgba(92,225,198,.17),transparent 60%),var(--bg);color:var(--ink);font:16px/1.4 ui-rounded,"SF Pro Rounded",-apple-system,system-ui,sans-serif;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+          .glass{background:var(--glass);border:1px solid var(--line);-webkit-backdrop-filter:blur(26px) saturate(150%);backdrop-filter:blur(26px) saturate(150%);box-shadow:0 24px 70px rgba(0,0,0,.45)}
+          #lock{position:fixed;inset:0;display:grid;place-items:center;padding:24px}
+          .card{width:min(440px,100%);padding:40px 34px;border-radius:36px;text-align:center}
+          .logo{width:76px;height:76px;margin:0 auto 22px;border-radius:24px;display:grid;place-items:center;background:linear-gradient(145deg,#3B6EF5,var(--mint));box-shadow:0 14px 36px rgba(59,110,245,.5)}
+          h1{margin:0 0 8px;font-size:34px;font-weight:700;letter-spacing:-.025em}
+          .card p{margin:0 0 26px;color:var(--mute)}
+          #pin{width:100%;padding:16px;border-radius:20px;border:1px solid var(--line);background:rgba(0,0,0,.25);color:var(--ink);font:600 30px ui-rounded,system-ui;letter-spacing:.45em;text-align:center;outline:none}
+          #pin:focus{border-color:var(--amber);box-shadow:0 0 0 4px rgba(255,184,77,.18)}
+          .go{width:100%;margin-top:14px;padding:16px;border:0;border-radius:20px;background:var(--amber);color:#2A1B00;font:700 18px ui-rounded,system-ui}
+          .go:active{transform:scale(.98)}
+          #err{min-height:22px;margin-top:14px;color:var(--bad);font-size:14px}
+          #app{display:none;height:100%;grid-template-columns:auto 1fr;gap:22px;padding:20px;align-items:center}
+          .dock{display:flex;flex-direction:column;gap:12px;padding:12px;border-radius:32px}
+          .btn{width:58px;height:58px;border-radius:20px;border:1px solid var(--line);background:rgba(255,255,255,.05);color:var(--ink);display:grid;place-items:center;transition:transform .12s,background .12s}
+          .btn:active,.btn.on{transform:scale(.92);background:rgba(255,184,77,.28);border-color:var(--amber)}
+          .btn svg,.logo svg{fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+          .btn svg{width:26px;height:26px}
+          .stage{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;height:100%;min-width:0}
+          .chip{display:inline-flex;align-items:center;gap:8px;padding:7px 15px;border-radius:99px;border:1px solid var(--line);background:var(--glass);font-size:13px;color:var(--mute)}
+          #dot{width:8px;height:8px;border-radius:50%;background:var(--bad)}
+          .phone{position:relative;padding:11px;border-radius:50px;background:#000;border:1px solid var(--line);box-shadow:0 34px 90px rgba(0,0,0,.65),0 0 0 7px rgba(255,255,255,.04);touch-action:none;height:calc(100dvh - 120px - env(safe-area-inset-top) - env(safe-area-inset-bottom));max-width:100%;aspect-ratio:9/19.5}
+          .phone img{display:block;width:100%;height:100%;object-fit:contain;border-radius:40px;pointer-events:none;-webkit-user-drag:none;user-select:none;background:#05090c}
+          .rip{position:absolute;width:56px;height:56px;margin:-28px 0 0 -28px;border-radius:50%;background:rgba(255,184,77,.4);border:2px solid rgba(255,255,255,.75);pointer-events:none;animation:rip .5s ease-out forwards}
+          @keyframes rip{from{transform:scale(.3);opacity:1}to{transform:scale(1.5);opacity:0}}
+          .tbar{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom));width:min(580px,92vw);display:flex;gap:10px;padding:10px;border-radius:26px;transform:translate(-50%,160%);transition:transform .3s}
+          .tbar.on{transform:translate(-50%,0)}
+          .tbar input{flex:1;min-width:0;padding:13px 16px;border-radius:18px;border:1px solid var(--line);background:rgba(0,0,0,.3);color:var(--ink);font:17px ui-rounded,system-ui;outline:none}
+          .tbar button{padding:0 22px;border:0;border-radius:18px;background:var(--amber);color:#2A1B00;font:700 16px ui-rounded,system-ui}
+          @media(prefers-reduced-motion:reduce){.rip{animation-duration:.01s}.tbar{transition:none}}
+          </style></head><body>
+          <div id="lock"><div class="glass card">
+            <div class="logo"><svg width="38" height="38" viewBox="0 0 24 24" style="color:#fff"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/></svg></div>
+            <h1>PhoneLink</h1><p>Gib die 6-stellige PIN ein, die auf deinem Handy steht.</p>
+            <input id="pin" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="off">
+            <button class="go" id="go">Mit Handy verbinden</button><div id="err"></div>
+          </div></div>
+          <div id="app">
+            <div class="dock glass">
+              <button class="btn" data-k="back" aria-label="Zurück"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+              <button class="btn" data-k="home" aria-label="Home"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/></svg></button>
+              <button class="btn" data-k="recents" aria-label="Letzte Apps"><svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="3.5"/></svg></button>
+              <button class="btn" data-k="notifications" aria-label="Mitteilungen"><svg viewBox="0 0 24 24"><path d="M6 17h12l-1.5-2v-4a4.5 4.5 0 00-9 0v4L6 17zM10 20h4"/></svg></button>
+              <button class="btn" id="kb" aria-label="Text eingeben"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="3"/><path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10"/></svg></button>
+              <button class="btn" id="fs" aria-label="Vollbild"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+            </div>
+            <div class="stage">
+              <div><span class="chip"><i id="dot"></i><span id="live">Verbinde …</span></span> <span class="chip" id="ctl">Nur Ansicht</span></div>
+              <div class="phone" id="ph"><img id="scr" alt="Handy-Bildschirm"></div>
+            </div>
+          </div>
+          <div class="tbar glass" id="tbar"><input id="txt" placeholder="Text für das markierte Eingabefeld" autocomplete="off"><button id="send">Senden</button></div>
+          <script>
+          const $=s=>document.querySelector(s);let K='';
+          try{K=localStorage.getItem('k')||''}catch(e){}
+          $('#pin').value=K;
+          const q=(p,o={})=>fetch(p+'?'+new URLSearchParams({k:K,...o}),{method:'POST'}).catch(()=>{});
+          function live(on){$('#dot').style.background=on?'var(--mint)':'var(--bad)';$('#live').textContent=on?'Live':'Getrennt – verbinde neu …'}
+          function stream(){$('#scr').src='/stream?k='+K+'&t='+Date.now()}
+          $('#scr').onload=()=>live(true);
+          $('#scr').onerror=()=>{live(false);setTimeout(stream,1500)};
+          async function info(first){
+            try{const r=await fetch('/info?k='+K);if(!r.ok)throw 0;const i=await r.json();
+              if(!i.w&&first){$('#err').textContent='Spiegelung auf dem Handy starten.';return false}
+              if(i.w)$('#ph').style.aspectRatio=i.w+'/'+i.h;
+              $('#ctl').textContent=i.ctl?'Steuerung aktiv':'Nur Ansicht';$('#ctl').style.color=i.ctl?'var(--mint)':'var(--mute)';return true
+            }catch(e){if(first)$('#err').textContent='PIN falsch oder Handy nicht erreichbar.';return false}
+          }
+          async function connect(){
+            K=$('#pin').value.trim();$('#err').textContent='';
+            if(!(await info(true)))return;
+            try{localStorage.setItem('k',K)}catch(e){}
+            $('#lock').style.display='none';$('#app').style.display='grid';stream();setInterval(()=>info(false),3000)
+          }
+          $('#go').onclick=connect;$('#pin').onkeydown=e=>{if(e.key==='Enter')connect()};
+          document.querySelectorAll('[data-k]').forEach(b=>b.onclick=()=>q('/key',{name:b.dataset.k}));
+          $('#kb').onclick=()=>{$('#tbar').classList.toggle('on');$('#kb').classList.toggle('on');if($('#tbar').classList.contains('on'))$('#txt').focus()};
+          const sendTxt=()=>q('/text',{t:$('#txt').value});
+          $('#send').onclick=sendTxt;$('#txt').onkeydown=e=>{if(e.key==='Enter')sendTxt()};
+          $('#fs').onclick=()=>{const d=document.documentElement;(d.requestFullscreen||d.webkitRequestFullscreen||(()=>{})).call(d)};
+          const ph=$('#ph');let d=null;
+          function ripple(e){const r=ph.getBoundingClientRect(),el=document.createElement('i');el.className='rip';el.style.left=(e.clientX-r.left)+'px';el.style.top=(e.clientY-r.top)+'px';ph.appendChild(el);setTimeout(()=>el.remove(),520)}
+          ph.addEventListener('pointerdown',e=>{ph.setPointerCapture(e.pointerId);d={x:e.clientX,y:e.clientY,t:Date.now()};ripple(e)});
+          ph.addEventListener('pointercancel',()=>d=null);
+          ph.addEventListener('pointerup',e=>{
+            if(!d)return;const r=$('#scr').getBoundingClientRect();
+            const n=(x,y)=>({x:Math.min(1,Math.max(0,(x-r.left)/r.width)),y:Math.min(1,Math.max(0,(y-r.top)/r.height))});
+            const a=n(d.x,d.y),b=n(e.clientX,e.clientY),dt=Date.now()-d.t,mv=Math.hypot(e.clientX-d.x,e.clientY-d.y);d=null;
+            if(mv>14)q('/swipe',{x1:a.x,y1:a.y,x2:b.x,y2:b.y,d:Math.min(700,Math.max(80,dt))});
+            else if(dt>500)q('/long',{x:a.x,y:a.y});else q('/tap',{x:a.x,y:a.y})
+          });
+          </script></body></html>
+          EOF
       - name: APK bauen
         run: gradle assembleDebug --no-daemon
-
       - uses: actions/upload-artifact@v4
         with:
-          name: Glim-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: PhoneLink-APK
+          path: app/build/outputs/apk/debug/*.apk

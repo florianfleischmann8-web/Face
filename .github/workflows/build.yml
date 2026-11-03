@@ -15,7 +15,7 @@ jobs:
           gradle-version: 8.9
       - name: Projekt erzeugen
         run: |
-          mkdir -p app/src/main/java/com/phonelink app/src/main/res/xml app/src/main/res/values app/src/main/assets
+          mkdir -p app/src/main/java/com/phonelink app/src/main/res/xml app/src/main/res/values app/src/main/res/drawable app/src/main/res/mipmap-anydpi-v26 app/src/main/assets
           cat > settings.gradle.kts <<'EOF'
           pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
           dependencyResolutionManagement { repositories { google(); mavenCentral() } }
@@ -50,13 +50,43 @@ jobs:
               android:canRetrieveWindowContent="true"
               android:notificationTimeout="100" />
           EOF
+          cat > app/src/main/res/drawable/ic_bg.xml <<'EOF'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android" xmlns:aapt="http://schemas.android.com/aapt"
+              android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+              <path android:pathData="M0,0h108v108h-108z">
+                  <aapt:attr name="android:fillColor">
+                      <gradient android:type="linear" android:startX="0" android:startY="0" android:endX="108" android:endY="108">
+                          <item android:offset="0" android:color="#0D1B24" />
+                          <item android:offset="1" android:color="#1E3A8A" />
+                      </gradient>
+                  </aapt:attr>
+              </path>
+          </vector>
+          EOF
+          cat > app/src/main/res/drawable/ic_fg.xml <<'EOF'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+              <path android:pathData="M36,33h14a5,5 0 0 1 5,5v32a5,5 0 0 1 -5,5h-14a5,5 0 0 1 -5,-5v-32a5,5 0 0 1 5,-5z"
+                  android:strokeColor="#FFFFFF" android:strokeWidth="3.6" android:fillColor="#00000000" />
+              <path android:pathData="M43,54m-3,0a3,3 0 1 0 6,0a3,3 0 1 0 -6,0" android:fillColor="#FFFFFF" />
+              <path android:pathData="M66.36,47.64A9,9 0 0 1 66.36,60.36" android:strokeColor="#FFB84D" android:strokeWidth="4.4" android:strokeLineCap="round" />
+              <path android:pathData="M72.02,41.98A17,17 0 0 1 72.02,66.02" android:strokeColor="#5CE1C6" android:strokeWidth="4.4" android:strokeLineCap="round" />
+              <path android:pathData="M77.68,36.32A25,25 0 0 1 77.68,71.68" android:strokeColor="#7AA2FF" android:strokeWidth="4.4" android:strokeLineCap="round" />
+          </vector>
+          EOF
+          cat > app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml <<'EOF'
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@drawable/ic_bg" />
+              <foreground android:drawable="@drawable/ic_fg" />
+          </adaptive-icon>
+          EOF
           cat > app/src/main/AndroidManifest.xml <<'EOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.INTERNET" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-              <application android:label="PhoneLink" android:theme="@android:style/Theme.Material.NoActionBar" android:usesCleartextTraffic="true">
+              <application android:label="PhoneLink" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher" android:theme="@android:style/Theme.Material.NoActionBar" android:usesCleartextTraffic="true">
                   <activity android:name=".MainActivity" android:exported="true">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -136,7 +166,7 @@ jobs:
               fun start() {
                   ss = ServerSocket().apply { reuseAddress = true; bind(InetSocketAddress(8080)) }
                   thread(isDaemon = true) {
-                      try { while (true) { val s = ss!!.accept(); thread(isDaemon = true) { handle(s) } } } catch (e: Exception) {}
+                      try { while (true) { val s = ss!!.accept(); s.tcpNoDelay = true; thread(isDaemon = true) { handle(s) } } } catch (e: Exception) {}
                   }
               }
               fun stop() { try { ss?.close() } catch (e: Exception) {} }
@@ -188,7 +218,7 @@ jobs:
                           last = s
                           out.write("--f\r\nContent-Type: image/jpeg\r\nContent-Length: ${f.size}\r\n\r\n".toByteArray())
                           out.write(f); out.write("\r\n".toByteArray()); out.flush()
-                      } else Thread.sleep(20)
+                      } else Thread.sleep(3)
                   }
               }
           }
@@ -235,24 +265,24 @@ jobs:
                   val dm = DisplayMetrics()
                   (getSystemService(WINDOW_SERVICE) as WindowManager).defaultDisplay.getRealMetrics(dm)
                   Shared.w = dm.widthPixels; Shared.h = dm.heightPixels
-                  val w = (minOf(720, dm.widthPixels) / 2) * 2
+                  val w = (minOf(800, dm.widthPixels) / 2) * 2
                   val h = ((dm.heightPixels * w / dm.widthPixels) / 2) * 2
                   ht = HandlerThread("pl").also { it.start() }
-                  ir = ImageReader.newInstance(w, h, PixelFormat.RGBA_8888, 2)
+                  ir = ImageReader.newInstance(w, h, PixelFormat.RGBA_8888, 3)
                   vd = mp!!.createVirtualDisplay("pl", w, h, dm.densityDpi, DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, ir!!.surface, null, null)
-                  var last = 0L
+                  var last = 0L; var bmp: Bitmap? = null; val bo = ByteArrayOutputStream(150000)
                   ir!!.setOnImageAvailableListener({ r ->
                       val img = r.acquireLatestImage() ?: return@setOnImageAvailableListener
                       try {
                           val now = SystemClock.uptimeMillis()
-                          if (now - last >= 70) {
+                          if (now - last >= 16) {
                               last = now
                               val p = img.planes[0]
-                              val bmp = Bitmap.createBitmap(p.rowStride / p.pixelStride, img.height, Bitmap.Config.ARGB_8888)
-                              bmp.copyPixelsFromBuffer(p.buffer)
-                              val bo = ByteArrayOutputStream()
-                              Bitmap.createBitmap(bmp, 0, 0, img.width, img.height).compress(Bitmap.CompressFormat.JPEG, 60, bo)
-                              bmp.recycle()
+                              val bw = p.rowStride / p.pixelStride; if (bmp == null || bmp!!.width != bw) bmp = Bitmap.createBitmap(bw, img.height, Bitmap.Config.ARGB_8888); val b = bmp!!
+                              b.copyPixelsFromBuffer(p.buffer)
+                              bo.reset()
+                              (if (bw != img.width) Bitmap.createBitmap(b, 0, 0, img.width, img.height) else b).compress(Bitmap.CompressFormat.JPEG, 70, bo)
+                              
                               Shared.frame = bo.toByteArray(); Shared.seq++
                           }
                       } finally { img.close() }
@@ -315,7 +345,7 @@ jobs:
                       layoutParams = LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(24) }
                   }
                   card.addView(tv("Öffne am iPad in Safari", 13f, gray))
-                  url = tv("", 20f, 0xFFFFB84D.toInt(), true).apply { typeface = Typeface.MONOSPACE }
+                  url = tv("", 15f, 0xFFFFB84D.toInt(), true).apply { typeface = Typeface.MONOSPACE }
                   card.addView(url)
                   card.addView(tv("PIN", 13f, gray).apply { setPadding(0, dp(14), 0, 0) })
                   card.addView(tv(Shared.pin, 34f, 0xFF5CE1C6.toInt(), true).apply { letterSpacing = 0.2f })
@@ -324,6 +354,7 @@ jobs:
                   b2 = btn(0xFF22394D.toInt()) { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
                   col.addView(b1); col.addView(b2)
                   col.addView(tv("Für die Fernsteuerung: Einstellungen → Apps → PhoneLink → ⋮ → „Eingeschränkte Einstellungen zulassen“. Danach unter Bedienungshilfen → Installierte Apps → PhoneLink einschalten.", 13f, gray).apply { setPadding(0, dp(16), 0, 0) })
+                  col.addView(tv("Von überall: Installiere Tailscale (gratis) auf Handy und iPad und melde beide mit demselben Konto an. Dann erscheint hier die „Überall“-Adresse.", 13f, gray).apply { setPadding(0, dp(12), 0, 0) })
                   setContentView(ScrollView(this).apply { setBackgroundColor(0xFF0D1B24.toInt()); addView(col) })
               }
 
@@ -342,9 +373,20 @@ jobs:
               override fun onResume() { super.onResume(); refresh() }
 
               private fun refresh() {
-                  url.text = if (Shared.running) "http://${ip()}:8080" else "Spiegelung ist aus"
+                  url.text = if (Shared.running) { val (lan, ts) = ips(); "WLAN: http://$lan:8080" + (if (ts != null) "\nÜberall: http://$ts:8080" else "") } else "Spiegelung ist aus"
                   b1.text = if (Shared.running) "Spiegelung stoppen" else "Spiegelung starten"
                   b2.text = if (ControlService.inst != null) "Fernsteuerung aktiv ✓" else "Fernsteuerung aktivieren"
+              }
+
+              private fun ips(): Pair<String, String?> {
+                  var lan = "kein WLAN"; var ts: String? = null
+                  try {
+                      for (n in NetworkInterface.getNetworkInterfaces()) for (a in n.inetAddresses) if (!a.isLoopbackAddress && a is Inet4Address) {
+                          val h = a.hostAddress ?: continue
+                          if (h.startsWith("100.") && (h.split(".")[1].toIntOrNull() ?: 0) in 64..127) ts = h else if (a.isSiteLocalAddress) lan = h
+                      }
+                  } catch (e: Exception) {}
+                  return Pair(lan, ts)
               }
 
               private fun ip(): String {
@@ -359,53 +401,69 @@ jobs:
           cat > app/src/main/assets/index.html <<'EOF'
           <!doctype html>
           <html lang="de"><head><meta charset="utf-8">
-          <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+          <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
           <meta name="apple-mobile-web-app-capable" content="yes">
           <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
           <meta name="theme-color" content="#0D1B24">
+          <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 108 108'%3E%3Crect width='108' height='108' rx='28' fill='%231E3A8A'/%3E%3Cpath d='M66 47a9 9 0 0 1 0 13M72 42a17 17 0 0 1 0 24' stroke='%23FFB84D' stroke-width='5' fill='none' stroke-linecap='round'/%3E%3Crect x='31' y='33' width='24' height='42' rx='5' fill='none' stroke='white' stroke-width='4'/%3E%3C/svg%3E">
           <title>PhoneLink</title>
           <style>
-          :root{--bg:#0D1B24;--glass:rgba(255,255,255,.06);--line:rgba(255,255,255,.13);--ink:#EAF2F5;--mute:#86A0AE;--amber:#FFB84D;--mint:#5CE1C6;--bad:#FF7A8A}
+          :root{--bg:#0D1B24;--glass:rgba(255,255,255,.08);--line:rgba(255,255,255,.16);--ink:#EAF2F5;--mute:#9DB3BF;--amber:#FFB84D;--mint:#5CE1C6;--blue:#3B6EF5;--bad:#FF7A8A}
           *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-          html,body{height:100%;margin:0;overflow:hidden}
-          body{background:radial-gradient(70% 55% at 12% 8%,rgba(59,110,245,.28),transparent 62%),radial-gradient(55% 50% at 92% 95%,rgba(92,225,198,.17),transparent 60%),var(--bg);color:var(--ink);font:16px/1.4 ui-rounded,"SF Pro Rounded",-apple-system,system-ui,sans-serif;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
-          .glass{background:var(--glass);border:1px solid var(--line);-webkit-backdrop-filter:blur(26px) saturate(150%);backdrop-filter:blur(26px) saturate(150%);box-shadow:0 24px 70px rgba(0,0,0,.45)}
+          html,body{height:100%;margin:0;overflow:hidden;overscroll-behavior:none}
+          body{background:var(--bg);color:var(--ink);font:16px/1.4 ui-rounded,"SF Pro Rounded",-apple-system,system-ui,sans-serif;-webkit-user-select:none;user-select:none}
+          #pin,#txt{-webkit-user-select:text;user-select:text}
+          .aur{position:fixed;inset:-20%;z-index:-1;filter:blur(80px) saturate(150%);opacity:.85}
+          .aur i{position:absolute;border-radius:50%;animation:drift 20s ease-in-out infinite alternate}
+          .aur i:nth-child(1){width:55vmax;height:55vmax;left:0;top:0;background:var(--blue)}
+          .aur i:nth-child(2){width:45vmax;height:45vmax;right:0;bottom:0;background:var(--mint);animation-delay:-7s}
+          .aur i:nth-child(3){width:36vmax;height:36vmax;left:38%;top:42%;background:var(--amber);opacity:.5;animation-delay:-12s}
+          @keyframes drift{to{transform:translate(12vmax,-9vmax) scale(1.25)}}
+          .glass{background:var(--glass);border:1px solid var(--line);-webkit-backdrop-filter:blur(28px) saturate(160%);backdrop-filter:blur(28px) saturate(160%);box-shadow:0 24px 70px rgba(0,0,0,.45)}
           #lock{position:fixed;inset:0;display:grid;place-items:center;padding:24px}
-          .card{width:min(440px,100%);padding:40px 34px;border-radius:36px;text-align:center}
-          .logo{width:76px;height:76px;margin:0 auto 22px;border-radius:24px;display:grid;place-items:center;background:linear-gradient(145deg,#3B6EF5,var(--mint));box-shadow:0 14px 36px rgba(59,110,245,.5)}
-          h1{margin:0 0 8px;font-size:34px;font-weight:700;letter-spacing:-.025em}
+          .card{width:min(460px,100%);padding:44px 36px 36px;border-radius:40px;text-align:center}
+          .logo{width:108px;height:108px;margin-bottom:20px;filter:drop-shadow(0 18px 44px rgba(59,110,245,.7))}
+          .logo path[class]{fill:none;stroke-width:4.4;stroke-linecap:round;animation:pulse 2.4s ease-in-out infinite}
+          .a2{animation-delay:.25s!important}.a3{animation-delay:.5s!important}
+          @keyframes pulse{0%,100%{opacity:.3}40%{opacity:1}}
+          h1{margin:0 0 8px;font-size:40px;font-weight:800;letter-spacing:-.03em}
           .card p{margin:0 0 26px;color:var(--mute)}
-          #pin{width:100%;padding:16px;border-radius:20px;border:1px solid var(--line);background:rgba(0,0,0,.25);color:var(--ink);font:600 30px ui-rounded,system-ui;letter-spacing:.45em;text-align:center;outline:none}
-          #pin:focus{border-color:var(--amber);box-shadow:0 0 0 4px rgba(255,184,77,.18)}
-          .go{width:100%;margin-top:14px;padding:16px;border:0;border-radius:20px;background:var(--amber);color:#2A1B00;font:700 18px ui-rounded,system-ui}
+          #pin{width:100%;padding:16px;border-radius:22px;border:1px solid var(--line);background:rgba(0,0,0,.3);color:var(--ink);font:700 32px ui-rounded,system-ui;letter-spacing:.45em;text-align:center;outline:none}
+          #pin:focus{border-color:var(--amber);box-shadow:0 0 0 4px rgba(255,184,77,.2)}
+          .go{width:100%;margin-top:14px;padding:17px;border:0;border-radius:22px;background:var(--amber);color:#2A1B00;font:800 18px ui-rounded,system-ui}
           .go:active{transform:scale(.98)}
           #err{min-height:22px;margin-top:14px;color:var(--bad);font-size:14px}
-          #app{display:none;height:100%;grid-template-columns:auto 1fr;gap:22px;padding:20px;align-items:center}
-          .dock{display:flex;flex-direction:column;gap:12px;padding:12px;border-radius:32px}
-          .btn{width:58px;height:58px;border-radius:20px;border:1px solid var(--line);background:rgba(255,255,255,.05);color:var(--ink);display:grid;place-items:center;transition:transform .12s,background .12s}
-          .btn:active,.btn.on{transform:scale(.92);background:rgba(255,184,77,.28);border-color:var(--amber)}
-          .btn svg,.logo svg{fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
-          .btn svg{width:26px;height:26px}
-          .stage{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;height:100%;min-width:0}
-          .chip{display:inline-flex;align-items:center;gap:8px;padding:7px 15px;border-radius:99px;border:1px solid var(--line);background:var(--glass);font-size:13px;color:var(--mute)}
+          #app{position:fixed;inset:0;display:none;touch-action:none}
+          #scr{position:absolute;background:#05090c;box-shadow:0 0 0 1px var(--line),0 30px 120px rgba(0,0,0,.6);pointer-events:none;-webkit-user-drag:none}
+          #chrome{position:fixed;inset:0;pointer-events:none;z-index:5;opacity:0;transition:opacity .3s}
+          #chrome.show{opacity:1}#chrome>*{pointer-events:none}#chrome.show>*{pointer-events:auto}
+          .chips{position:absolute;top:calc(14px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);display:flex;gap:8px}
+          .chip{display:inline-flex;align-items:center;gap:8px;padding:7px 15px;border-radius:99px;font-size:13px;color:var(--mute)}
           #dot{width:8px;height:8px;border-radius:50%;background:var(--bad)}
-          .phone{position:relative;padding:11px;border-radius:50px;background:#000;border:1px solid var(--line);box-shadow:0 34px 90px rgba(0,0,0,.65),0 0 0 7px rgba(255,255,255,.04);touch-action:none;height:calc(100dvh - 120px - env(safe-area-inset-top) - env(safe-area-inset-bottom));max-width:100%;aspect-ratio:9/19.5}
-          .phone img{display:block;width:100%;height:100%;object-fit:contain;border-radius:40px;pointer-events:none;-webkit-user-drag:none;user-select:none;background:#05090c}
-          .rip{position:absolute;width:56px;height:56px;margin:-28px 0 0 -28px;border-radius:50%;background:rgba(255,184,77,.4);border:2px solid rgba(255,255,255,.75);pointer-events:none;animation:rip .5s ease-out forwards}
+          .dock{position:absolute;bottom:calc(54px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);display:flex;gap:10px;padding:10px;border-radius:36px}
+          .btn{width:56px;height:56px;border-radius:22px;border:1px solid var(--line);background:rgba(255,255,255,.06);color:var(--ink);display:grid;place-items:center;transition:transform .12s,background .12s}
+          .btn:active,.btn.on{transform:scale(.9);background:rgba(255,184,77,.3);border-color:var(--amber)}
+          .btn svg{width:26px;height:26px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+          #grab{display:none;position:fixed;bottom:env(safe-area-inset-bottom);left:50%;transform:translateX(-50%);width:140px;height:40px;place-items:center;z-index:6}
+          #grab i{width:70px;height:5px;border-radius:9px;background:rgba(255,255,255,.4)}
+          .rip{position:fixed;width:60px;height:60px;margin:-30px 0 0 -30px;border-radius:50%;background:rgba(255,184,77,.4);border:2px solid rgba(255,255,255,.8);pointer-events:none;z-index:4;animation:rip .5s ease-out forwards}
           @keyframes rip{from{transform:scale(.3);opacity:1}to{transform:scale(1.5);opacity:0}}
-          .tbar{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom));width:min(580px,92vw);display:flex;gap:10px;padding:10px;border-radius:26px;transform:translate(-50%,160%);transition:transform .3s}
+          .tbar{position:fixed;left:50%;bottom:calc(128px + env(safe-area-inset-bottom));width:min(580px,92vw);display:flex;gap:10px;padding:10px;border-radius:28px;transform:translate(-50%,400%);transition:transform .3s;z-index:7}
           .tbar.on{transform:translate(-50%,0)}
-          .tbar input{flex:1;min-width:0;padding:13px 16px;border-radius:18px;border:1px solid var(--line);background:rgba(0,0,0,.3);color:var(--ink);font:17px ui-rounded,system-ui;outline:none}
-          .tbar button{padding:0 22px;border:0;border-radius:18px;background:var(--amber);color:#2A1B00;font:700 16px ui-rounded,system-ui}
-          @media(prefers-reduced-motion:reduce){.rip{animation-duration:.01s}.tbar{transition:none}}
+          .tbar input{flex:1;min-width:0;padding:13px 16px;border-radius:20px;border:1px solid var(--line);background:rgba(0,0,0,.35);color:var(--ink);font:17px ui-rounded,system-ui;outline:none}
+          .tbar button{padding:0 22px;border:0;border-radius:20px;background:var(--amber);color:#2A1B00;font:800 16px ui-rounded,system-ui}
+          @media(prefers-reduced-motion:reduce){.aur i,.logo path[class]{animation:none}.rip{animation-duration:.01s}.tbar,#chrome{transition:none}}
           </style></head><body>
+          <div class="aur"><i></i><i></i><i></i></div>
           <div id="lock"><div class="glass card">
-            <div class="logo"><svg width="38" height="38" viewBox="0 0 24 24" style="color:#fff"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/></svg></div>
+            <svg class="logo" viewBox="0 0 108 108"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0D1B24"/><stop offset="1" stop-color="#1E3A8A"/></linearGradient></defs><rect width="108" height="108" rx="28" fill="url(#g)"/><path d="M36,33h14a5,5 0 0 1 5,5v32a5,5 0 0 1 -5,5h-14a5,5 0 0 1 -5,-5v-32a5,5 0 0 1 5,-5z" fill="none" stroke="#fff" stroke-width="3.6"/><circle cx="43" cy="54" r="3" fill="#fff"/><path class="a1" d="M66.36,47.64A9,9 0 0 1 66.36,60.36" stroke="#FFB84D"/><path class="a2" d="M72.02,41.98A17,17 0 0 1 72.02,66.02" stroke="#5CE1C6"/><path class="a3" d="M77.68,36.32A25,25 0 0 1 77.68,71.68" stroke="#7AA2FF"/></svg>
             <h1>PhoneLink</h1><p>Gib die 6-stellige PIN ein, die auf deinem Handy steht.</p>
             <input id="pin" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="off">
             <button class="go" id="go">Mit Handy verbinden</button><div id="err"></div>
           </div></div>
-          <div id="app">
+          <div id="app"><img id="scr" alt="Handy-Bildschirm"></div>
+          <div id="chrome">
+            <div class="chips"><span class="chip glass"><i id="dot"></i><span id="live">Verbinde …</span></span><span class="chip glass" id="ctl">Nur Ansicht</span></div>
             <div class="dock glass">
               <button class="btn" data-k="back" aria-label="Zurück"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
               <button class="btn" data-k="home" aria-label="Home"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/></svg></button>
@@ -414,14 +472,11 @@ jobs:
               <button class="btn" id="kb" aria-label="Text eingeben"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="3"/><path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10"/></svg></button>
               <button class="btn" id="fs" aria-label="Vollbild"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
             </div>
-            <div class="stage">
-              <div><span class="chip"><i id="dot"></i><span id="live">Verbinde …</span></span> <span class="chip" id="ctl">Nur Ansicht</span></div>
-              <div class="phone" id="ph"><img id="scr" alt="Handy-Bildschirm"></div>
-            </div>
           </div>
+          <div id="grab" aria-label="Menü"><i></i></div>
           <div class="tbar glass" id="tbar"><input id="txt" placeholder="Text für das markierte Eingabefeld" autocomplete="off"><button id="send">Senden</button></div>
           <script>
-          const $=s=>document.querySelector(s);let K='';
+          const $=s=>document.querySelector(s);let K='',A=9/19.5,ht;
           try{K=localStorage.getItem('k')||''}catch(e){}
           $('#pin').value=K;
           const q=(p,o={})=>fetch(p+'?'+new URLSearchParams({k:K,...o}),{method:'POST'}).catch(()=>{});
@@ -429,10 +484,15 @@ jobs:
           function stream(){$('#scr').src='/stream?k='+K+'&t='+Date.now()}
           $('#scr').onload=()=>live(true);
           $('#scr').onerror=()=>{live(false);setTimeout(stream,1500)};
+          function fit(){const vw=innerWidth,vh=innerHeight;let h=vh,w=h*A;if(w>vw){w=vw;h=w/A}const s=$('#scr').style;s.width=w+'px';s.height=h+'px';s.left=(vw-w)/2+'px';s.top=(vh-h)/2+'px'}
+          addEventListener('resize',fit);
+          function showUI(){const c=$('#chrome');c.classList.add('show');clearTimeout(ht);ht=setTimeout(()=>{if(!$('#tbar').classList.contains('on'))c.classList.remove('show')},4000)}
+          $('#grab').onclick=()=>{const c=$('#chrome');if(c.classList.contains('show')){c.classList.remove('show');clearTimeout(ht)}else showUI()};
+          $('#chrome').addEventListener('pointerdown',showUI);
           async function info(first){
             try{const r=await fetch('/info?k='+K);if(!r.ok)throw 0;const i=await r.json();
-              if(!i.w&&first){$('#err').textContent='Spiegelung auf dem Handy starten.';return false}
-              if(i.w)$('#ph').style.aspectRatio=i.w+'/'+i.h;
+              if(!i.w&&first){$('#err').textContent='Starte zuerst die Spiegelung auf dem Handy.';return false}
+              if(i.w){A=i.w/i.h;fit()}
               $('#ctl').textContent=i.ctl?'Steuerung aktiv':'Nur Ansicht';$('#ctl').style.color=i.ctl?'var(--mint)':'var(--mute)';return true
             }catch(e){if(first)$('#err').textContent='PIN falsch oder Handy nicht erreichbar.';return false}
           }
@@ -440,19 +500,20 @@ jobs:
             K=$('#pin').value.trim();$('#err').textContent='';
             if(!(await info(true)))return;
             try{localStorage.setItem('k',K)}catch(e){}
-            $('#lock').style.display='none';$('#app').style.display='grid';stream();setInterval(()=>info(false),3000)
+            $('#lock').style.display='none';$('#app').style.display='block';$('#grab').style.display='grid';
+            fit();stream();showUI();setInterval(()=>info(false),3000)
           }
           $('#go').onclick=connect;$('#pin').onkeydown=e=>{if(e.key==='Enter')connect()};
           document.querySelectorAll('[data-k]').forEach(b=>b.onclick=()=>q('/key',{name:b.dataset.k}));
-          $('#kb').onclick=()=>{$('#tbar').classList.toggle('on');$('#kb').classList.toggle('on');if($('#tbar').classList.contains('on'))$('#txt').focus()};
+          $('#kb').onclick=()=>{const t=$('#tbar');t.classList.toggle('on');$('#kb').classList.toggle('on');if(t.classList.contains('on'))$('#txt').focus();else showUI()};
           const sendTxt=()=>q('/text',{t:$('#txt').value});
           $('#send').onclick=sendTxt;$('#txt').onkeydown=e=>{if(e.key==='Enter')sendTxt()};
           $('#fs').onclick=()=>{const d=document.documentElement;(d.requestFullscreen||d.webkitRequestFullscreen||(()=>{})).call(d)};
-          const ph=$('#ph');let d=null;
-          function ripple(e){const r=ph.getBoundingClientRect(),el=document.createElement('i');el.className='rip';el.style.left=(e.clientX-r.left)+'px';el.style.top=(e.clientY-r.top)+'px';ph.appendChild(el);setTimeout(()=>el.remove(),520)}
-          ph.addEventListener('pointerdown',e=>{ph.setPointerCapture(e.pointerId);d={x:e.clientX,y:e.clientY,t:Date.now()};ripple(e)});
-          ph.addEventListener('pointercancel',()=>d=null);
-          ph.addEventListener('pointerup',e=>{
+          const st=$('#app');let d=null;
+          function ripple(e){const el=document.createElement('i');el.className='rip';el.style.left=e.clientX+'px';el.style.top=e.clientY+'px';document.body.appendChild(el);setTimeout(()=>el.remove(),520)}
+          st.addEventListener('pointerdown',e=>{const r=$('#scr').getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)return;st.setPointerCapture(e.pointerId);d={x:e.clientX,y:e.clientY,t:Date.now()};ripple(e)});
+          st.addEventListener('pointercancel',()=>d=null);
+          st.addEventListener('pointerup',e=>{
             if(!d)return;const r=$('#scr').getBoundingClientRect();
             const n=(x,y)=>({x:Math.min(1,Math.max(0,(x-r.left)/r.width)),y:Math.min(1,Math.max(0,(y-r.top)/r.height))});
             const a=n(d.x,d.y),b=n(e.clientX,e.clientY),dt=Date.now()-d.t,mv=Math.hypot(e.clientX-d.x,e.clientY-d.y);d=null;

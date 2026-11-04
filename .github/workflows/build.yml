@@ -109,6 +109,9 @@ jobs:
           import android.accessibilityservice.GestureDescription
           import android.graphics.Path
           import android.os.Bundle
+          import android.os.Handler
+          import android.os.Looper
+          import android.os.SystemClock
           import android.view.accessibility.AccessibilityEvent
           import android.view.accessibility.AccessibilityNodeInfo
 
@@ -124,6 +127,54 @@ jobs:
                   val g = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(p, 0, maxOf(dur, 1L))).build()
                   dispatchGesture(g, null, null)
               }
+              private class P(var cx: Float, var cy: Float, var tx: Float, var ty: Float) {
+                  var stroke: GestureDescription.StrokeDescription? = null
+                  var ending = false
+                  var started = false
+              }
+              private val ptrs = LinkedHashMap<Int, P>()
+              private val main = Handler(Looper.getMainLooper())
+              private var busy = false
+              private var lastT = 0L
+
+              fun touch(t: String, id: Int, x: Float, y: Float) {
+                  main.post {
+                      when (t) {
+                          "d" -> ptrs[id] = P(x, y, x, y)
+                          "m" -> ptrs[id]?.let { it.tx = x; it.ty = y }
+                          "u" -> ptrs[id]?.let { it.tx = x; it.ty = y; it.ending = true }
+                      }
+                      pump()
+                  }
+              }
+
+              private fun pump() {
+                  if (busy) return
+                  if (ptrs.values.none { !it.started || it.cx != it.tx || it.cy != it.ty || it.ending }) return
+                  val now = SystemClock.uptimeMillis()
+                  val dur = if (lastT == 0L) 30L else (now - lastT).coerceIn(20L, 80L)
+                  lastT = now
+                  val b = GestureDescription.Builder()
+                  for (p in ptrs.values) {
+                      val path = Path().apply { moveTo(p.cx, p.cy); if (p.tx != p.cx || p.ty != p.cy) lineTo(p.tx, p.ty) }
+                      val cont = !p.ending
+                      val s = p.stroke?.continueStroke(path, 0L, dur, cont) ?: GestureDescription.StrokeDescription(path, 0L, dur, cont)
+                      p.stroke = s; p.cx = p.tx; p.cy = p.ty; p.started = true
+                      b.addStroke(s)
+                  }
+                  busy = true
+                  val ok = dispatchGesture(b.build(), object : AccessibilityService.GestureResultCallback() {
+                      override fun onCompleted(g: GestureDescription?) {
+                          busy = false
+                          ptrs.values.removeAll { it.ending }
+                          if (ptrs.isEmpty()) lastT = 0L
+                          pump()
+                      }
+                      override fun onCancelled(g: GestureDescription?) { busy = false; ptrs.clear(); lastT = 0L }
+                  }, main)
+                  if (!ok) { busy = false; ptrs.clear() }
+              }
+
               fun key(n: String) {
                   performGlobalAction(when (n) {
                       "back" -> GLOBAL_ACTION_BACK
@@ -144,7 +195,11 @@ jobs:
           package com.phonelink
 
           import android.content.Context
+          import android.util.Base64
+          import java.io.DataInputStream
+          import java.io.InputStream
           import java.io.OutputStream
+          import java.security.MessageDigest
           import java.net.InetSocketAddress
           import java.net.ServerSocket
           import java.net.Socket
@@ -181,7 +236,8 @@ jobs:
                       sock.use {
                           val inp = it.getInputStream().bufferedReader(Charsets.ISO_8859_1)
                           val line = inp.readLine() ?: return
-                          while (true) { val h = inp.readLine(); if (h.isNullOrEmpty()) break }
+                          var wsKey: String? = null
+                          while (true) { val h = inp.readLine(); if (h.isNullOrEmpty()) break; if (h.startsWith("Sec-WebSocket-Key:", true)) wsKey = h.substringAfter(":").trim() }
                           val target = line.split(" ").getOrElse(1) { "/" }
                           val path = target.substringBefore("?")
                           val q = HashMap<String, String>()
@@ -197,6 +253,7 @@ jobs:
                           fun f(n: String) = q[n]?.toFloatOrNull() ?: 0f
                           when (path) {
                               "/stream" -> { stream(out); return }
+                              "/ws" -> { ws(it.getInputStream(), out, wsKey); return }
                               "/info" -> { resp(out, 200, "application/json", "{\"w\":${Shared.w},\"h\":${Shared.h},\"ctl\":${c != null}}".toByteArray()); return }
                               "/tap" -> c?.gesture(f("x") * W, f("y") * H, f("x") * W, f("y") * H, 40)
                               "/long" -> c?.gesture(f("x") * W, f("y") * H, f("x") * W, f("y") * H, 700)
@@ -207,6 +264,34 @@ jobs:
                           resp(out, 200, "text/plain", "ok".toByteArray())
                       }
                   } catch (e: Exception) {}
+              }
+
+              private fun ws(inp: InputStream, out: OutputStream, key: String?) {
+                  if (key == null) return
+                  val acc = Base64.encodeToString(MessageDigest.getInstance("SHA-1").digest((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").toByteArray()), Base64.NO_WRAP)
+                  out.write("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: $acc\r\n\r\n".toByteArray())
+                  out.flush()
+                  val din = DataInputStream(inp)
+                  while (Shared.running) {
+                      val b0 = din.readUnsignedByte(); val b1 = din.readUnsignedByte()
+                      var len = (b1 and 0x7F).toLong()
+                      if (len == 126L) len = din.readUnsignedShort().toLong() else if (len == 127L) len = din.readLong()
+                      if (len > 100000L) return
+                      val mask = if ((b1 and 0x80) != 0) ByteArray(4).also { din.readFully(it) } else null
+                      val buf = ByteArray(len.toInt()); din.readFully(buf)
+                      if (mask != null) for (i in buf.indices) buf[i] = (buf[i].toInt() xor mask[i % 4].toInt()).toByte()
+                      when (b0 and 0x0F) {
+                          1 -> touchMsg(String(buf, Charsets.UTF_8))
+                          8 -> return
+                          9 -> synchronized(out) { out.write(byteArrayOf(0x8A.toByte(), 0)); out.flush() }
+                      }
+                  }
+              }
+
+              private fun touchMsg(m: String) {
+                  val p = m.split(" ")
+                  val c = ControlService.inst ?: return
+                  try { c.touch(p[0], p[1].toInt(), p[2].toFloat() * Shared.w, p[3].toFloat() * Shared.h) } catch (e: Exception) {}
               }
 
               private fun stream(out: OutputStream) {
@@ -446,13 +531,13 @@ jobs:
           .btn svg{width:26px;height:26px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
           #grab{display:none;position:fixed;bottom:env(safe-area-inset-bottom);left:50%;transform:translateX(-50%);width:140px;height:40px;place-items:center;z-index:6}
           #grab i{width:70px;height:5px;border-radius:9px;background:rgba(255,255,255,.4)}
-          .rip{position:fixed;width:60px;height:60px;margin:-30px 0 0 -30px;border-radius:50%;background:rgba(255,184,77,.4);border:2px solid rgba(255,255,255,.8);pointer-events:none;z-index:4;animation:rip .5s ease-out forwards}
-          @keyframes rip{from{transform:scale(.3);opacity:1}to{transform:scale(1.5);opacity:0}}
+          .dot{position:fixed;width:64px;height:64px;margin:-32px 0 0 -32px;border-radius:50%;background:radial-gradient(circle,rgba(255,184,77,.55),rgba(255,184,77,.12));border:2px solid rgba(255,255,255,.75);pointer-events:none;z-index:4;animation:dotin .15s ease-out}
+          @keyframes dotin{from{transform:scale(.5);opacity:0}}
           .tbar{position:fixed;left:50%;bottom:calc(128px + env(safe-area-inset-bottom));width:min(580px,92vw);display:flex;gap:10px;padding:10px;border-radius:28px;transform:translate(-50%,400%);transition:transform .3s;z-index:7}
           .tbar.on{transform:translate(-50%,0)}
           .tbar input{flex:1;min-width:0;padding:13px 16px;border-radius:20px;border:1px solid var(--line);background:rgba(0,0,0,.35);color:var(--ink);font:17px ui-rounded,system-ui;outline:none}
           .tbar button{padding:0 22px;border:0;border-radius:20px;background:var(--amber);color:#2A1B00;font:800 16px ui-rounded,system-ui}
-          @media(prefers-reduced-motion:reduce){.aur i,.logo path[class]{animation:none}.rip{animation-duration:.01s}.tbar,#chrome{transition:none}}
+          @media(prefers-reduced-motion:reduce){.aur i,.logo path[class]{animation:none}.tbar,#chrome{transition:none}}
           </style></head><body>
           <div class="aur"><i></i><i></i><i></i></div>
           <div id="lock"><div class="glass card">
@@ -501,7 +586,7 @@ jobs:
             if(!(await info(true)))return;
             try{localStorage.setItem('k',K)}catch(e){}
             $('#lock').style.display='none';$('#app').style.display='block';$('#grab').style.display='grid';
-            fit();stream();showUI();setInterval(()=>info(false),3000)
+            fit();stream();openWS();showUI();setInterval(()=>info(false),3000)
           }
           $('#go').onclick=connect;$('#pin').onkeydown=e=>{if(e.key==='Enter')connect()};
           document.querySelectorAll('[data-k]').forEach(b=>b.onclick=()=>q('/key',{name:b.dataset.k}));
@@ -509,17 +594,20 @@ jobs:
           const sendTxt=()=>q('/text',{t:$('#txt').value});
           $('#send').onclick=sendTxt;$('#txt').onkeydown=e=>{if(e.key==='Enter')sendTxt()};
           $('#fs').onclick=()=>{const d=document.documentElement;(d.requestFullscreen||d.webkitRequestFullscreen||(()=>{})).call(d)};
-          const st=$('#app');let d=null;
-          function ripple(e){const el=document.createElement('i');el.className='rip';el.style.left=e.clientX+'px';el.style.top=e.clientY+'px';document.body.appendChild(el);setTimeout(()=>el.remove(),520)}
-          st.addEventListener('pointerdown',e=>{const r=$('#scr').getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)return;st.setPointerCapture(e.pointerId);d={x:e.clientX,y:e.clientY,t:Date.now()};ripple(e)});
-          st.addEventListener('pointercancel',()=>d=null);
-          st.addEventListener('pointerup',e=>{
-            if(!d)return;const r=$('#scr').getBoundingClientRect();
-            const n=(x,y)=>({x:Math.min(1,Math.max(0,(x-r.left)/r.width)),y:Math.min(1,Math.max(0,(y-r.top)/r.height))});
-            const a=n(d.x,d.y),b=n(e.clientX,e.clientY),dt=Date.now()-d.t,mv=Math.hypot(e.clientX-d.x,e.clientY-d.y);d=null;
-            if(mv>14)q('/swipe',{x1:a.x,y1:a.y,x2:b.x,y2:b.y,d:Math.min(700,Math.max(80,dt))});
-            else if(dt>500)q('/long',{x:a.x,y:a.y});else q('/tap',{x:a.x,y:a.y})
-          });
+          const st=$('#app');let ws,pend={},raf=0;const ids=new Map(),dots=new Map();
+          function openWS(){ws=new WebSocket('ws://'+location.host+'/ws?k='+K);ws.onclose=()=>setTimeout(openWS,1500)}
+          const send=m=>{if(ws&&ws.readyState===1)ws.send(m)};
+          const cl=v=>Math.min(1,Math.max(0,v));
+          const nrm=e=>{const r=$('#scr').getBoundingClientRect();return cl((e.clientX-r.left)/r.width).toFixed(4)+' '+cl((e.clientY-r.top)/r.height).toFixed(4)};
+          const inRect=e=>{const r=$('#scr').getBoundingClientRect();return e.clientX>=r.left&&e.clientX<=r.right&&e.clientY>=r.top&&e.clientY<=r.bottom};
+          function nid(){let i=0;const u=[...ids.values()];while(u.includes(i))i++;return i}
+          function dot(e){let el=dots.get(e.pointerId);if(!el){el=document.createElement('i');el.className='dot';document.body.appendChild(el);dots.set(e.pointerId,el)}el.style.left=e.clientX+'px';el.style.top=e.clientY+'px'}
+          st.addEventListener('pointerdown',e=>{if(!inRect(e))return;st.setPointerCapture(e.pointerId);const i=nid();ids.set(e.pointerId,i);send('d '+i+' '+nrm(e));dot(e)});
+          st.addEventListener('pointermove',e=>{const i=ids.get(e.pointerId);if(i===undefined)return;pend[i]=nrm(e);dot(e);if(!raf)raf=requestAnimationFrame(()=>{raf=0;for(const k in pend)send('m '+k+' '+pend[k]);pend={}})});
+          const up=e=>{const i=ids.get(e.pointerId);if(i===undefined)return;delete pend[i];send('u '+i+' '+nrm(e));ids.delete(e.pointerId);const el=dots.get(e.pointerId);if(el){el.remove();dots.delete(e.pointerId)}};
+          st.addEventListener('pointerup',up);st.addEventListener('pointercancel',up);
+          document.addEventListener('gesturestart',e=>e.preventDefault());
+
           </script></body></html>
           EOF
       - name: APK bauen

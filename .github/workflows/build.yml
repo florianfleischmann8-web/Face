@@ -97,6 +97,7 @@ jobs:
               implementation("androidx.compose.material3:material3")
               implementation("androidx.compose.material:material-icons-extended")
               implementation("androidx.work:work-runtime-ktx:2.9.0")
+          implementation("androidx.health.connect:connect-client:1.1.0-alpha07")
               implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
           }
           EOF
@@ -117,6 +118,13 @@ jobs:
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
               <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+          <uses-permission android:name="android.permission.VIBRATE" />
+          <uses-permission android:name="android.permission.health.READ_STEPS" />
+          <uses-permission android:name="android.permission.health.WRITE_STEPS" />
+
+          <queries>
+              <package android:name="com.google.android.apps.healthdata" />
+          </queries>
 
               <application
                   android:allowBackup="true"
@@ -134,7 +142,21 @@ jobs:
                           <action android:name="android.intent.action.MAIN" />
                           <category android:name="android.intent.category.LAUNCHER" />
                       </intent-filter>
+                      <intent-filter>
+                          <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
+                      </intent-filter>
                   </activity>
+
+                  <activity-alias
+                      android:name="ViewPermissionUsageActivity"
+                      android:exported="true"
+                      android:permission="android.permission.START_VIEW_PERMISSION_USAGE"
+                      android:targetActivity=".MainActivity">
+                      <intent-filter>
+                          <action android:name="android.intent.action.VIEW_PERMISSION_USAGE" />
+                          <category android:name="android.intent.category.HEALTH_PERMISSIONS" />
+                      </intent-filter>
+                  </activity-alias>
 
                   <service
                       android:name=".TrackingService"
@@ -364,7 +386,7 @@ jobs:
           EOF
 
       # ------------------------------------------------------------------
-      - name: Kotlin - Datenhaltung, Widget, Hintergrund-Sync
+      - name: Kotlin - Daten, Widget, Hintergrund-Sync, Health Connect, Export
         run: |
           cat > app/src/main/java/com/stride/app/Store.kt <<'EOF'
           package com.stride.app
@@ -374,13 +396,30 @@ jobs:
           import org.json.JSONArray
           import java.io.File
           import java.time.LocalDate
+          import java.util.concurrent.Executors
           import kotlin.math.*
 
-          data class Day(val date: String, val total: Int, val fake: Int, val run: Int) {
+          data class Settings(
+              val goal: Int = 10000,
+              val height: Int = 175,
+              val weight: Int = 70,
+              val reduce: Boolean = false,
+              val haptics: Boolean = true,
+              val theme: Int = 0, // 0 Auto, 1 Hell, 2 Dunkel
+              val hc: Boolean = false
+          )
+
+          data class Day(
+              val date: String, val total: Int, val fake: Int, val run: Int,
+              val heightCm: Int = 175, val weightKg: Int = 70
+          ) {
               val real: Int get() = max(0, total - fake)
               val walk: Int get() = max(0, real - run)
-              val km: Double get() = (walk * 0.72 + run * 1.05) / 1000.0
-              val kcal: Int get() = (walk * 0.72 * 0.045 + run * 1.05 * 0.07).roundToInt()
+              // Schrittlaenge: Gehen = Groesse * 0,415 ; Laufen = Groesse * 0,60
+              val walkKm: Double get() = walk * heightCm * 0.415 / 100000.0
+              val runKm: Double get() = run * heightCm * 0.60 / 100000.0
+              val km: Double get() = walkKm + runKm
+              val kcal: Int get() = (walkKm * weightKg * 0.64 + runKm * weightKg * 1.0).roundToInt()
           }
 
           object Store {
@@ -416,64 +455,162 @@ jobs:
 
               fun day(c: Context, d: String): Day {
                   val s = sp(c)
-                  return Day(d, s.getInt(key(d, "total"), 0), s.getInt(key(d, "fake"), 0), s.getInt(key(d, "run"), 0))
+                  return Day(
+                      d, s.getInt(key(d, "total"), 0), s.getInt(key(d, "fake"), 0), s.getInt(key(d, "run"), 0),
+                      s.getInt("height", 175), s.getInt("weight", 70)
+                  )
               }
 
               fun today(c: Context): Day = day(c, todayKey())
+
+              /** Fuellt einen Tag aus einer Sicherung (nur wenn der Wert groesser ist). */
+              @Synchronized
+              fun fillDay(c: Context, d: String, total: Int): Boolean {
+                  val s = sp(c)
+                  val k = key(d, "total")
+                  if (total > s.getInt(k, 0)) {
+                      s.edit().putInt(k, total).apply()
+                      return true
+                  }
+                  return false
+              }
+
+              fun settings(c: Context): Settings {
+                  val s = sp(c)
+                  return Settings(
+                      s.getInt("goal", 10000), s.getInt("height", 175), s.getInt("weight", 70),
+                      s.getBoolean("reduce", false), s.getBoolean("haptics", true),
+                      s.getInt("theme", 0), s.getBoolean("hc", false)
+                  )
+              }
+
+              fun saveSettings(c: Context, v: Settings) {
+                  sp(c).edit()
+                      .putInt("goal", v.goal.coerceIn(1000, 50000))
+                      .putInt("height", v.height.coerceIn(120, 230))
+                      .putInt("weight", v.weight.coerceIn(30, 200))
+                      .putBoolean("reduce", v.reduce)
+                      .putBoolean("haptics", v.haptics)
+                      .putInt("theme", v.theme)
+                      .putBoolean("hc", v.hc)
+                      .apply()
+              }
+
               fun goal(c: Context): Int = sp(c).getInt("goal", 10000)
-              fun setGoal(c: Context, g: Int) = sp(c).edit().putInt("goal", g.coerceIn(1000, 50000)).apply()
               fun tracking(c: Context): Boolean = sp(c).getBoolean("tracking", false)
               fun setTracking(c: Context, on: Boolean) = sp(c).edit().putBoolean("tracking", on).apply()
+
+              /** true genau einmal pro Tag, sobald das Tagesziel erreicht ist. */
+              @Synchronized
+              fun goalJustReached(c: Context): Boolean {
+                  val s = sp(c)
+                  val k = "goal_hit_${todayKey()}"
+                  val d = today(c)
+                  if (d.real > 0 && d.real >= goal(c) && !s.getBoolean(k, false)) {
+                      s.edit().putBoolean(k, true).apply()
+                      return true
+                  }
+                  return false
+              }
           }
 
           data class Pt(val lat: Double, val lon: Double, val t: Long, val seg: Int, val run: Boolean)
           data class RouteStats(val distM: Double, val timeS: Double, val avgKmh: Double)
 
-          /** Lauftour der letzten Stunde. Nur aktive Abschnitte, alles Aeltere wird geloescht. */
+          /**
+           * Lauftour der letzten Stunde.
+           * Performance: Punkte liegen im Speicher (Cache), Schreibzugriffe laufen auf einem eigenen
+           * Hintergrund-Thread und werden gebuendelt (max. alle 10 s) - nie auf dem Main-Thread.
+           */
           object Route {
               private const val HOUR = 3_600_000L
+              private val io = Executors.newSingleThreadExecutor { r -> Thread(r, "route-io").apply { isDaemon = true } }
+              private var cache: MutableList<Pt>? = null
+              private var lastWrite = 0L
+
               private fun file(c: Context) = File(c.applicationContext.filesDir, "route.json")
 
-              @Synchronized
-              fun load(c: Context): List<Pt> {
+              private fun readFile(c: Context): MutableList<Pt> {
                   val f = file(c)
-                  if (!f.exists()) return emptyList()
+                  if (!f.exists()) return mutableListOf()
                   return try {
                       val a = JSONArray(f.readText())
-                      val cutoff = System.currentTimeMillis() - HOUR
-                      val all = (0 until a.length()).map {
-                          val o = a.getJSONArray(it)
-                          Pt(o.getDouble(0), o.getDouble(1), o.getLong(2), o.getInt(3), o.getInt(4) == 1)
+                      val out = ArrayList<Pt>()
+                      for (i in 0 until a.length()) {
+                          val o = a.getJSONArray(i)
+                          out.add(Pt(o.getDouble(0), o.getDouble(1), o.getLong(2), o.getInt(3), o.getInt(4) == 1))
                       }
-                      val keep = all.filter { it.t >= cutoff }
-                      if (keep.size != all.size) save(c, keep)
-                      keep
+                      out
                   } catch (e: Exception) {
-                      emptyList()
+                      mutableListOf()
                   }
               }
 
-              @Synchronized
-              fun save(c: Context, pts: List<Pt>) {
-                  val a = JSONArray()
-                  pts.forEach { a.put(JSONArray().put(it.lat).put(it.lon).put(it.t).put(it.seg).put(if (it.run) 1 else 0)) }
-                  file(c).writeText(a.toString())
+              private fun writeFile(c: Context, pts: List<Pt>) {
+                  try {
+                      val a = JSONArray()
+                      pts.forEach { a.put(JSONArray().put(it.lat).put(it.lon).put(it.t).put(it.seg).put(if (it.run) 1 else 0)) }
+                      file(c).writeText(a.toString())
+                  } catch (e: Exception) {
+                  }
+              }
+
+              private fun ensure(c: Context): MutableList<Pt> {
+                  val cur = cache
+                  if (cur != null) return cur
+                  val l = readFile(c)
+                  cache = l
+                  return l
+              }
+
+              private fun prune(l: MutableList<Pt>) {
+                  val cutoff = System.currentTimeMillis() - HOUR
+                  l.removeAll { it.t < cutoff }
               }
 
               @Synchronized
+              fun load(c: Context): List<Pt> {
+                  val l = ensure(c)
+                  prune(l)
+                  return l.toList()
+              }
+
+              /** Asynchron + gebuendelt. */
               fun add(c: Context, p: Pt) {
-                  val cutoff = System.currentTimeMillis() - HOUR
-                  save(c, (load(c) + p).filter { it.t >= cutoff })
+                  io.execute {
+                      synchronized(this) {
+                          val l = ensure(c)
+                          l.add(p)
+                          prune(l)
+                          val now = System.currentTimeMillis()
+                          if (now - lastWrite > 10_000L) {
+                              lastWrite = now
+                              writeFile(c, l.toList())
+                          }
+                      }
+                  }
               }
 
               /** Zu kurze Abschnitte (kein echtes Laufen) werden verworfen. */
-              @Synchronized
               fun dropShortSegment(c: Context, seg: Int) {
-                  val l = load(c)
-                  if (l.count { it.seg == seg } < 3) save(c, l.filter { it.seg != seg })
+                  io.execute {
+                      synchronized(this) {
+                          val l = ensure(c)
+                          if (l.count { it.seg == seg } < 3) l.removeAll { it.seg == seg }
+                          prune(l)
+                          writeFile(c, l.toList())
+                      }
+                  }
               }
 
-              @Synchronized fun clear(c: Context) { file(c).delete() }
+              fun clear(c: Context) {
+                  io.execute {
+                      synchronized(this) {
+                          ensure(c).clear()
+                          file(c).delete()
+                      }
+                  }
+              }
 
               fun dist(a: Pt, b: Pt): Double {
                   val r = 6371000.0
@@ -514,6 +651,7 @@ jobs:
           import android.hardware.SensorEvent
           import android.hardware.SensorEventListener
           import android.hardware.SensorManager
+          import androidx.work.Constraints
           import androidx.work.CoroutineWorker
           import androidx.work.ExistingPeriodicWorkPolicy
           import androidx.work.OneTimeWorkRequestBuilder
@@ -550,16 +688,20 @@ jobs:
 
           class SyncWorker(c: Context, p: WorkerParameters) : CoroutineWorker(c, p) {
               override suspend fun doWork(): Result {
-                  val v = Counter.read(applicationContext)
-                  if (v != null) Store.sync(applicationContext, v)
-                  StepWidget.updateAll(applicationContext)
+                  val ctx = applicationContext
+                  val v = Counter.read(ctx)
+                  if (v != null) Store.sync(ctx, v)
+                  if (Store.settings(ctx).hc) HealthSync.push(ctx)
+                  StepWidget.updateAll(ctx)
                   return Result.success()
               }
           }
 
           object Scheduler {
               fun schedule(c: Context) {
-                  val req = PeriodicWorkRequestBuilder<SyncWorker>(15, TimeUnit.MINUTES).build()
+                  // Akku-schonend: nicht bei fast leerem Akku
+                  val cons = Constraints.Builder().setRequiresBatteryNotLow(true).build()
+                  val req = PeriodicWorkRequestBuilder<SyncWorker>(15, TimeUnit.MINUTES).setConstraints(cons).build()
                   WorkManager.getInstance(c.applicationContext)
                       .enqueueUniquePeriodicWork("stride_sync", ExistingPeriodicWorkPolicy.KEEP, req)
               }
@@ -573,6 +715,162 @@ jobs:
               override fun onReceive(c: Context, i: Intent?) {
                   Scheduler.schedule(c)
                   Scheduler.now(c)
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/stride/app/Extras.kt <<'EOF'
+          package com.stride.app
+
+          import android.content.Context
+          import android.os.Build
+          import android.os.VibrationEffect
+          import android.os.Vibrator
+          import android.os.VibratorManager
+          import androidx.health.connect.client.HealthConnectClient
+          import androidx.health.connect.client.permission.HealthPermission
+          import androidx.health.connect.client.records.StepsRecord
+          import androidx.health.connect.client.records.metadata.DataOrigin
+          import androidx.health.connect.client.records.metadata.Metadata
+          import androidx.health.connect.client.request.ReadRecordsRequest
+          import androidx.health.connect.client.time.TimeRangeFilter
+          import java.time.Instant
+          import java.time.LocalDate
+          import java.time.ZoneId
+          import java.util.Locale
+
+          // ------------------------------------------------------------------ Haptik
+          object Haptics {
+              private var lastWarn = 0L
+
+              @Suppress("DEPRECATION")
+              private fun vib(c: Context): Vibrator? = try {
+                  if (Build.VERSION.SDK_INT >= 31) {
+                      (c.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
+                  } else {
+                      c.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+                  }
+              } catch (e: Exception) {
+                  null
+              }
+
+              /** Ziel erreicht: dreifaches, dezentes Pulsen */
+              fun success(c: Context) {
+                  if (!Store.settings(c).haptics) return
+                  vib(c)?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 25, 80, 25, 80, 70), -1))
+              }
+
+              /** Fake-Schritt entlarvt: kurzer Tick (maximal alle 2 s) */
+              fun warn(c: Context) {
+                  if (!Store.settings(c).haptics) return
+                  val n = System.currentTimeMillis()
+                  if (n - lastWarn < 2000L) return
+                  lastWarn = n
+                  vib(c)?.vibrate(VibrationEffect.createOneShot(40, VibrationEffect.DEFAULT_AMPLITUDE))
+              }
+          }
+
+          // ------------------------------------------------------------------ Health Connect
+          object HealthSync {
+              val permissions: Set<String> = setOf(
+                  HealthPermission.getReadPermission(StepsRecord::class),
+                  HealthPermission.getWritePermission(StepsRecord::class)
+              )
+
+              fun available(c: Context): Boolean =
+                  HealthConnectClient.getSdkStatus(c) == HealthConnectClient.SDK_AVAILABLE
+
+              /** Schreibt die echten Schritte der letzten 3 Tage (ein Datensatz pro Tag, wird aktualisiert statt dupliziert). */
+              suspend fun push(c: Context): Boolean {
+                  if (!available(c)) return false
+                  return try {
+                      val client = HealthConnectClient.getOrCreate(c)
+                      if (!client.permissionController.getGrantedPermissions().containsAll(permissions)) return false
+                      val zone = ZoneId.systemDefault()
+                      val recs = ArrayList<StepsRecord>()
+                      for (i in 0..2) {
+                          val date = LocalDate.now().minusDays(i.toLong())
+                          val day = Store.day(c, date.toString())
+                          if (day.real <= 0) continue
+                          val start = date.atStartOfDay(zone).toInstant()
+                          val end = if (i == 0) Instant.now() else date.plusDays(1).atStartOfDay(zone).toInstant()
+                          if (!end.isAfter(start)) continue
+                          recs.add(
+                              StepsRecord(
+                                  count = day.real.toLong(),
+                                  startTime = start,
+                                  startZoneOffset = zone.rules.getOffset(start),
+                                  endTime = end,
+                                  endZoneOffset = zone.rules.getOffset(end),
+                                  metadata = Metadata(clientRecordId = "stride-$date", clientRecordVersion = System.currentTimeMillis())
+                              )
+                          )
+                      }
+                      if (recs.isNotEmpty()) client.insertRecords(recs)
+                      true
+                  } catch (e: Exception) {
+                      false
+                  }
+              }
+
+              /** Holt eigene Tagessummen der letzten 30 Tage zurueck (neues Handy / Neuinstallation). -1 = Fehler */
+              suspend fun restore(c: Context): Int {
+                  if (!available(c)) return -1
+                  return try {
+                      val client = HealthConnectClient.getOrCreate(c)
+                      if (!client.permissionController.getGrantedPermissions().containsAll(permissions)) return -1
+                      val zone = ZoneId.systemDefault()
+                      val from = LocalDate.now().minusDays(30).atStartOfDay(zone).toInstant()
+                      val resp = client.readRecords(
+                          ReadRecordsRequest(
+                              StepsRecord::class,
+                              TimeRangeFilter.between(from, Instant.now()),
+                              setOf(DataOrigin(c.packageName))
+                          )
+                      )
+                      val perDay = resp.records
+                          .groupBy { it.startTime.atZone(zone).toLocalDate() }
+                          .mapValues { e -> e.value.sumOf { it.count } }
+                      var n = 0
+                      perDay.forEach { (d, cnt) -> if (Store.fillDay(c, d.toString(), cnt.toInt())) n++ }
+                      n
+                  } catch (e: Exception) {
+                      -1
+                  }
+              }
+          }
+
+          // ------------------------------------------------------------------ Export
+          object Export {
+              fun gpx(pts: List<Pt>): String {
+                  val sb = StringBuilder()
+                  sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
+                  sb.append("<gpx version=\"1.1\" creator=\"Stride\" xmlns=\"http://www.topografix.com/GPX/1/1\">\n")
+                  sb.append("<trk><name>Stride Route</name>\n")
+                  pts.groupBy { it.seg }.forEach { (_, l) ->
+                      sb.append("<trkseg>\n")
+                      l.forEach {
+                          sb.append(
+                              String.format(
+                                  Locale.US, "<trkpt lat=\"%.6f\" lon=\"%.6f\"><time>%s</time></trkpt>\n",
+                                  it.lat, it.lon, Instant.ofEpochMilli(it.t).toString()
+                              )
+                          )
+                      }
+                      sb.append("</trkseg>\n")
+                  }
+                  sb.append("</trk>\n</gpx>\n")
+                  return sb.toString()
+              }
+
+              fun csv(c: Context): String {
+                  val sb = StringBuilder("\uFEFF")
+                  sb.append("Datum;Schritte gesamt;Echte Schritte;Fake-Schritte;Gehen;Laufen;Distanz km;Kalorien\n")
+                  for (i in 29 downTo 0) {
+                      val d = Store.day(c, LocalDate.now().minusDays(i.toLong()).toString())
+                      sb.append("${d.date};${d.total};${d.real};${d.fake};${d.walk};${d.run};${d.km.f2()};${d.kcal}\n")
+                  }
+                  return sb.toString()
               }
           }
           EOF
@@ -662,22 +960,34 @@ jobs:
            *  - unregelmaessiger Rhythmus-> Fake (Schuetteln)
            *  - extreme Amplitude        -> Fake (heftiges Schuetteln)
            * Danach Unterscheidung Gehen / Laufen ueber Kadenz + Aufprallstaerke.
+           *
+           * Akku: Der Beschleunigungssensor wird gebatcht geliefert (CPU schlaeft zwischendurch).
+           * Deshalb werden Schritte erst ausgewertet, wenn Beschleunigungsdaten NACH dem Schritt vorliegen.
+           * Alle Aufrufe kommen von EINEM Sensor-Thread.
            */
           class Detector(private val onReal: (Boolean) -> Unit, private val onFake: () -> Unit) {
               private class S(val t: Long, val m: Float)
 
               private val buf = ArrayDeque<S>()
               private val steps = ArrayDeque<Long>()
+              private val pending = ArrayDeque<Long>()
 
+              @Volatile
               var lastRealAt = 0L
                   private set
 
               fun onAccel(t: Long, x: Float, y: Float, z: Float) {
                   buf.addLast(S(t, sqrt(x * x + y * y + z * z)))
-                  while (buf.isNotEmpty() && t - buf.first().t > 1200) buf.removeFirst()
+                  while (buf.isNotEmpty() && t - buf.first().t > 1500) buf.removeFirst()
+                  while (pending.isNotEmpty() && t - pending.first() >= 120) evaluate(pending.removeFirst())
               }
 
               fun onStep(t: Long) {
+                  pending.addLast(t)
+                  while (pending.size > 60) pending.removeFirst()
+              }
+
+              private fun evaluate(t: Long) {
                   var mn = Float.MAX_VALUE
                   var mx = 0f
                   var n = 0
@@ -748,12 +1058,15 @@ jobs:
           import android.os.Build
           import android.os.Bundle
           import android.os.Handler
+          import android.os.HandlerThread
           import android.os.IBinder
           import android.os.Looper
           import android.os.SystemClock
 
           /**
            * Optionale "Live-Erkennung": Foreground-Service (mit Benachrichtigung).
+           * - Sensor-Auswertung und GPS-Callbacks laufen auf einem eigenen Hintergrund-Thread (nicht Main).
+           * - Beschleunigungssensor wird gebatcht (1 s) -> CPU kann zwischendurch schlafen.
            * - GPS laeuft NUR waehrend aktivem Gehen/Laufen. Punkte ohne Aktivitaet werden verworfen.
            * - Alles aelter als 60 Minuten wird geloescht.
            */
@@ -762,6 +1075,8 @@ jobs:
               private lateinit var sm: SensorManager
               private lateinit var lm: LocationManager
               private lateinit var det: Detector
+              private val sensorThread = HandlerThread("stride-sensors")
+              private lateinit var sh: Handler
               private val handler = Handler(Looper.getMainLooper())
               private var seg = 1
               private var wasActive = false
@@ -774,6 +1089,8 @@ jobs:
                   super.onCreate()
                   sm = getSystemService(SENSOR_SERVICE) as SensorManager
                   lm = getSystemService(LOCATION_SERVICE) as LocationManager
+                  sensorThread.start()
+                  sh = Handler(sensorThread.looper)
                   det = Detector(
                       onReal = { run ->
                           if (run) Store.addRun(this)
@@ -782,13 +1099,16 @@ jobs:
                       onFake = {
                           Store.addFake(this)
                           Live.fakeFlash = System.currentTimeMillis()
+                          Haptics.warn(this)
                       }
                   )
                   seg = (System.currentTimeMillis() / 1000L).toInt()
                   startForegroundCompat()
-                  sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)?.let { sm.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME) }
-                  sm.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)?.let { sm.registerListener(this, it, SensorManager.SENSOR_DELAY_FASTEST) }
-                  sm.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)?.let { sm.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL) }
+                  // Accelerometer: 50 Hz, aber in 1-s-Paketen geliefert (Batching spart Akku)
+                  sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)?.let { sm.registerListener(this, it, 20_000, 1_000_000, sh) }
+                  // Step-Detector sofort (selten, ueberholt das Accel-Paket => wird erst danach ausgewertet)
+                  sm.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)?.let { sm.registerListener(this, it, SensorManager.SENSOR_DELAY_FASTEST, sh) }
+                  sm.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)?.let { sm.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL, 5_000_000, sh) }
                   Live.running = true
                   Live.mode = "idle"
                   handler.post(tick)
@@ -830,7 +1150,10 @@ jobs:
                   when (e.sensor.type) {
                       Sensor.TYPE_ACCELEROMETER -> det.onAccel(t, e.values[0], e.values[1], e.values[2])
                       Sensor.TYPE_STEP_DETECTOR -> det.onStep(t)
-                      Sensor.TYPE_STEP_COUNTER -> Store.sync(this, e.values[0])
+                      Sensor.TYPE_STEP_COUNTER -> {
+                          Store.sync(this, e.values[0])
+                          if (Store.goalJustReached(this)) Haptics.success(this)
+                      }
                   }
               }
 
@@ -839,7 +1162,8 @@ jobs:
               @SuppressLint("MissingPermission")
               private fun startGps() {
                   try {
-                      lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 2000L, 2f, this)
+                      // Callbacks laufen auf dem Sensor-Thread, nicht auf dem Main-Thread
+                      lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 2000L, 2f, this, sensorThread.looper)
                       gpsOn = true
                       Live.gps = true
                   } catch (e: Exception) {
@@ -857,7 +1181,7 @@ jobs:
 
               override fun onLocationChanged(l: Location) {
                   if (!isActive() || l.accuracy > 35f) return // kein aktives Laufen => Punkt wird verworfen
-                  Route.add(this, Pt(l.latitude, l.longitude, System.currentTimeMillis(), seg, Live.mode == "run"))
+                  Route.add(this, Pt(l.latitude, l.longitude, System.currentTimeMillis(), seg, Live.mode == "run")) // async
               }
 
               @Deprecated("Deprecated in Java")
@@ -889,6 +1213,7 @@ jobs:
                   sm.unregisterListener(this)
                   stopGps()
                   Route.dropShortSegment(this, seg)
+                  sensorThread.quitSafely()
                   Live.running = false
                   Live.mode = "idle"
                   Live.cadence = 0
@@ -898,7 +1223,7 @@ jobs:
           EOF
 
       # ------------------------------------------------------------------
-      - name: Kotlin - Oberflaeche (Apple-Glas-Design)
+      - name: Kotlin - Oberflaeche (Apple-Glas-Design, Hell/Dunkel)
         run: |
           cat > app/src/main/java/com/stride/app/MainActivity.kt <<'EOF'
           package com.stride.app
@@ -914,6 +1239,8 @@ jobs:
           import android.net.Uri
           import android.os.Build
           import android.os.Bundle
+          import android.os.PowerManager
+          import android.widget.Toast
           import androidx.activity.ComponentActivity
           import androidx.activity.SystemBarStyle
           import androidx.activity.compose.rememberLauncherForActivityResult
@@ -946,6 +1273,7 @@ jobs:
           import androidx.compose.foundation.clickable
           import androidx.compose.foundation.interaction.MutableInteractionSource
           import androidx.compose.foundation.interaction.collectIsPressedAsState
+          import androidx.compose.foundation.isSystemInDarkTheme
           import androidx.compose.foundation.layout.Arrangement
           import androidx.compose.foundation.layout.Box
           import androidx.compose.foundation.layout.Column
@@ -977,14 +1305,18 @@ jobs:
           import androidx.compose.material3.SwitchDefaults
           import androidx.compose.material3.Text
           import androidx.compose.material3.darkColorScheme
+          import androidx.compose.material3.lightColorScheme
           import androidx.compose.runtime.Composable
+          import androidx.compose.runtime.CompositionLocalProvider
           import androidx.compose.runtime.DisposableEffect
           import androidx.compose.runtime.LaunchedEffect
           import androidx.compose.runtime.getValue
           import androidx.compose.runtime.mutableIntStateOf
           import androidx.compose.runtime.mutableStateOf
           import androidx.compose.runtime.remember
+          import androidx.compose.runtime.rememberCoroutineScope
           import androidx.compose.runtime.setValue
+          import androidx.compose.runtime.staticCompositionLocalOf
           import androidx.compose.ui.Alignment
           import androidx.compose.ui.Modifier
           import androidx.compose.ui.draw.clip
@@ -994,18 +1326,23 @@ jobs:
           import androidx.compose.ui.graphics.Brush
           import androidx.compose.ui.graphics.Color
           import androidx.compose.ui.graphics.StrokeCap
+          import androidx.compose.ui.graphics.drawscope.DrawScope
           import androidx.compose.ui.graphics.drawscope.Stroke
           import androidx.compose.ui.graphics.drawscope.rotate
           import androidx.compose.ui.graphics.lerp
+          import androidx.compose.ui.hapticfeedback.HapticFeedbackType
           import androidx.compose.ui.platform.LocalContext
+          import androidx.compose.ui.platform.LocalHapticFeedback
           import androidx.compose.ui.text.font.FontWeight
           import androidx.compose.ui.text.style.TextAlign
           import androidx.compose.ui.unit.Dp
           import androidx.compose.ui.unit.dp
           import androidx.compose.ui.unit.sp
           import androidx.core.content.ContextCompat
+          import androidx.health.connect.client.PermissionController
           import kotlinx.coroutines.Dispatchers
           import kotlinx.coroutines.delay
+          import kotlinx.coroutines.launch
           import kotlinx.coroutines.withContext
           import java.time.LocalDate
           import java.time.format.DateTimeFormatter
@@ -1017,7 +1354,7 @@ jobs:
           import kotlin.math.min
           import kotlin.math.sin
 
-          // ---------------------------------------------------------------- Farben
+          // ---------------------------------------------------------------- Farben & Paletten
           val Ink = Color(0xFF080A12)
           val Mint = Color(0xFF30D158)
           val Sky = Color(0xFF64D2FF)
@@ -1026,20 +1363,60 @@ jobs:
           val Amber = Color(0xFFFF9F0A)
           val Rose = Color(0xFFFF375F)
 
+          data class Pal(
+              val dark: Boolean, val bg: Color, val fg: Color, val accent: Color,
+              val gTop: Color, val gBot: Color, val bTop: Color, val bBot: Color,
+              val bar: Color, val blob: Float
+          )
+
+          val DarkPal = Pal(
+              true, Ink, Color.White, Sky,
+              Color.White.copy(alpha = .16f), Color.White.copy(alpha = .05f),
+              Color.White.copy(alpha = .38f), Color.White.copy(alpha = .06f),
+              Color(0xCC0B0E17), .48f
+          )
+          val LightPal = Pal(
+              false, Color(0xFFEFF2F9), Color(0xFF0B0E17), Azure,
+              Color.White.copy(alpha = .82f), Color.White.copy(alpha = .52f),
+              Color.White, Color.Black.copy(alpha = .07f),
+              Color(0xE6FFFFFF), .30f
+          )
+
+          val LocalPal = staticCompositionLocalOf { DarkPal }
+          val LocalHaptics = staticCompositionLocalOf { true }
+
+          /** Akzentfarben im Light-Mode etwas abdunkeln (Kontrast auf hellem Glas). */
+          @Composable
+          fun tone(c: Color): Color = if (LocalPal.current.dark) c else lerp(c, Color.Black, .3f)
+
           fun Int.fmt(): String = String.format(Locale.GERMAN, "%,d", this)
           fun Double.f1(): String = String.format(Locale.GERMAN, "%.1f", this)
           fun Double.f2(): String = String.format(Locale.GERMAN, "%.2f", this)
+
+          fun toast(c: Context, s: String) = Toast.makeText(c, s, Toast.LENGTH_SHORT).show()
+
+          object UiState {
+              var foreground by mutableStateOf(true)
+          }
 
           // ---------------------------------------------------------------- Activity
           class MainActivity : ComponentActivity() {
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
-                  enableEdgeToEdge(
-                      statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
-                      navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
-                  )
+                  enableEdgeToEdge()
                   Scheduler.schedule(this)
                   setContent { App() }
+              }
+
+              override fun onResume() {
+                  super.onResume()
+                  UiState.foreground = true
+                  StepWidget.updateAll(this)
+              }
+
+              override fun onPause() {
+                  UiState.foreground = false
+                  super.onPause()
               }
           }
 
@@ -1066,35 +1443,88 @@ jobs:
           @Composable
           fun App() {
               val ctx = LocalContext.current
+              val scope = rememberCoroutineScope()
               var tab by remember { mutableIntStateOf(0) }
+              var st by remember { mutableStateOf(Store.settings(ctx)) }
               var d by remember { mutableStateOf(Store.today(ctx)) }
-              var route by remember { mutableStateOf(Route.load(ctx)) }
-              var goal by remember { mutableIntStateOf(Store.goal(ctx)) }
+              var route by remember { mutableStateOf<List<Pt>>(emptyList()) }
               var perms by remember { mutableStateOf(permState(ctx)) }
+              var saver by remember { mutableStateOf(false) }
 
+              val change: (Settings) -> Unit = { n ->
+                  Store.saveSettings(ctx, n)
+                  st = Store.settings(ctx)
+                  d = Store.today(ctx)
+              }
+
+              // ----- Launcher
               val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
                   perms = permState(ctx)
+              }
+              val hcLauncher = rememberLauncherForActivityResult(PermissionController.createRequestPermissionResultContract()) { granted ->
+                  if (granted.containsAll(HealthSync.permissions)) {
+                      change(st.copy(hc = true))
+                      scope.launch {
+                          withContext(Dispatchers.IO) { HealthSync.push(ctx) }
+                          toast(ctx, "Health Connect verbunden")
+                      }
+                  } else {
+                      toast(ctx, "Health Connect: Zugriff nicht erteilt")
+                  }
+              }
+              val gpxLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/gpx+xml")) { uri ->
+                  if (uri != null) scope.launch {
+                      val ok = withContext(Dispatchers.IO) {
+                          try {
+                              ctx.contentResolver.openOutputStream(uri)?.use { it.write(Export.gpx(Route.load(ctx)).toByteArray()) }
+                              true
+                          } catch (e: Exception) {
+                              false
+                          }
+                      }
+                      toast(ctx, if (ok) "Route gespeichert" else "Export fehlgeschlagen")
+                  }
+              }
+              val csvLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
+                  if (uri != null) scope.launch {
+                      val ok = withContext(Dispatchers.IO) {
+                          try {
+                              ctx.contentResolver.openOutputStream(uri)?.use { it.write(Export.csv(ctx).toByteArray()) }
+                              true
+                          } catch (e: Exception) {
+                              false
+                          }
+                      }
+                      toast(ctx, if (ok) "Verlauf gespeichert" else "Export fehlgeschlagen")
+                  }
               }
 
               LaunchedEffect(Unit) {
                   if (!perms.act) launcher.launch(needed())
               }
 
-              // Tick: UI-Daten aktualisieren
+              // ----- Tick: UI-Daten aktualisieren (pausiert, solange die App im Hintergrund ist)
               LaunchedEffect(Unit) {
                   var n = 0
                   while (true) {
-                      d = Store.today(ctx)
-                      route = withContext(Dispatchers.IO) { Route.load(ctx) }
-                      goal = Store.goal(ctx)
-                      perms = permState(ctx)
-                      if (n++ % 20 == 0) StepWidget.updateAll(ctx)
-                      delay(1000)
+                      if (UiState.foreground) {
+                          d = Store.today(ctx)
+                          route = withContext(Dispatchers.IO) { Route.load(ctx) }
+                          perms = permState(ctx)
+                          val ns = Store.settings(ctx)
+                          if (ns != st) st = ns
+                          saver = (ctx.getSystemService(Context.POWER_SERVICE) as PowerManager).isPowerSaveMode
+                          if (Store.goalJustReached(ctx)) Haptics.success(ctx)
+                          if (n++ % 20 == 0) StepWidget.updateAll(ctx)
+                          delay(1000)
+                      } else {
+                          delay(3000)
+                      }
                   }
               }
 
-              // Hardware-Zaehler live mitlesen, solange die App offen ist
-              DisposableEffect(perms.act) {
+              // ----- Hardware-Zaehler nur mitlesen, solange die App sichtbar ist
+              DisposableEffect(perms.act, UiState.foreground) {
                   val sm = ctx.getSystemService(Context.SENSOR_SERVICE) as SensorManager
                   val sensor = sm.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
                   val l = object : SensorEventListener {
@@ -1104,11 +1534,11 @@ jobs:
                       }
                       override fun onAccuracyChanged(x: Sensor?, a: Int) {}
                   }
-                  if (sensor != null && perms.act) sm.registerListener(l, sensor, SensorManager.SENSOR_DELAY_UI)
+                  if (sensor != null && perms.act && UiState.foreground) sm.registerListener(l, sensor, SensorManager.SENSOR_DELAY_UI)
                   onDispose { sm.unregisterListener(l) }
               }
 
-              // Live-Service nach App-/Prozess-Neustart wiederherstellen
+              // ----- Live-Service nach App-/Prozess-Neustart wiederherstellen
               LaunchedEffect(perms.act, perms.loc) {
                   if (Store.tracking(ctx) && perms.act && perms.loc && !Live.running) {
                       try {
@@ -1135,72 +1565,125 @@ jobs:
                   }
               }
 
+              val onHc: (Boolean) -> Unit = { on ->
+                  if (!on) {
+                      change(st.copy(hc = false))
+                  } else if (!HealthSync.available(ctx)) {
+                      toast(ctx, "Health Connect ist auf diesem Gerät nicht verfügbar")
+                  } else {
+                      hcLauncher.launch(HealthSync.permissions)
+                  }
+              }
+
+              val onRestore: () -> Unit = {
+                  scope.launch {
+                      val n = withContext(Dispatchers.IO) { HealthSync.restore(ctx) }
+                      toast(ctx, if (n < 0) "Health Connect: kein Zugriff" else "$n Tage wiederhergestellt")
+                  }
+              }
+
+              val onGpx: () -> Unit = {
+                  if (route.size < 2) toast(ctx, "Keine Route vorhanden") else gpxLauncher.launch("stride-route.gpx")
+              }
+              val onCsv: () -> Unit = { csvLauncher.launch("stride-verlauf.csv") }
+
               val hist = remember(d) {
                   (6 downTo 0).map { Store.day(ctx, LocalDate.now().minusDays(it.toLong()).toString()) }
               }
 
-              MaterialTheme(colorScheme = darkColorScheme(primary = Sky, background = Ink, surface = Ink)) {
-                  Surface(Modifier.fillMaxSize(), color = Color.Transparent, contentColor = Color.White) {
-                      Box(Modifier.fillMaxSize()) {
-                          Aurora(Modifier.fillMaxSize())
-                          AnimatedContent(
-                              targetState = tab,
-                              modifier = Modifier.fillMaxSize(),
-                              transitionSpec = {
-                                  val dir = if (targetState > initialState) 1 else -1
-                                  (fadeIn(tween(380, delayMillis = 60)) +
-                                      slideInHorizontally(tween(420, easing = FastOutSlowInEasing)) { it / 7 * dir }) togetherWith
-                                      (fadeOut(tween(200)) +
-                                          slideOutHorizontally(tween(420, easing = FastOutSlowInEasing)) { -it / 7 * dir })
-                              },
-                              label = "tabs"
-                          ) { t ->
-                              when (t) {
-                                  0 -> Home(d, goal, route, Live.running, onToggle)
-                                  1 -> RouteScreen(route)
-                                  2 -> History(hist, goal)
-                                  else -> SettingsScreen(goal, perms,
-                                      onGoal = { Store.setGoal(ctx, it); goal = Store.goal(ctx) },
-                                      onAsk = { launcher.launch(needed()) })
+              // ----- Theme
+              val sysDark = isSystemInDarkTheme()
+              val dark = when (st.theme) {
+                  1 -> false
+                  2 -> true
+                  else -> sysDark
+              }
+              val pal = if (dark) DarkPal else LightPal
+              val activity = ctx as? ComponentActivity
+              LaunchedEffect(dark) {
+                  val transparent = android.graphics.Color.TRANSPARENT
+                  activity?.enableEdgeToEdge(
+                      statusBarStyle = if (dark) SystemBarStyle.dark(transparent) else SystemBarStyle.light(transparent, transparent),
+                      navigationBarStyle = if (dark) SystemBarStyle.dark(transparent) else SystemBarStyle.light(transparent, transparent)
+                  )
+              }
+              val animateBg = !st.reduce && UiState.foreground && !saver
+
+              MaterialTheme(
+                  colorScheme = if (dark) darkColorScheme(primary = Sky, background = pal.bg, surface = pal.bg)
+                  else lightColorScheme(primary = Azure, background = pal.bg, surface = pal.bg)
+              ) {
+                  CompositionLocalProvider(LocalPal provides pal, LocalHaptics provides st.haptics) {
+                      Surface(Modifier.fillMaxSize(), color = Color.Transparent, contentColor = pal.fg) {
+                          Box(Modifier.fillMaxSize()) {
+                              Aurora(Modifier.fillMaxSize(), animateBg)
+                              AnimatedContent(
+                                  targetState = tab,
+                                  modifier = Modifier.fillMaxSize(),
+                                  transitionSpec = {
+                                      val dir = if (targetState > initialState) 1 else -1
+                                      (fadeIn(tween(380, delayMillis = 60)) +
+                                          slideInHorizontally(tween(420, easing = FastOutSlowInEasing)) { it / 7 * dir }) togetherWith
+                                          (fadeOut(tween(200)) +
+                                              slideOutHorizontally(tween(420, easing = FastOutSlowInEasing)) { -it / 7 * dir })
+                                  },
+                                  label = "tabs"
+                              ) { t ->
+                                  when (t) {
+                                      0 -> Home(d, st.goal, route, Live.running, onToggle)
+                                      1 -> RouteScreen(route)
+                                      2 -> History(hist, st.goal)
+                                      else -> SettingsScreen(st, perms, change, { launcher.launch(needed()) }, onHc, onRestore, onGpx, onCsv)
+                                  }
                               }
+                              TabBar(tab, { tab = it }, Modifier.align(Alignment.BottomCenter).navigationBarsPadding())
                           }
-                          TabBar(tab, { tab = it }, Modifier.align(Alignment.BottomCenter).navigationBarsPadding())
                       }
                   }
               }
           }
 
           // ---------------------------------------------------------------- Bausteine
+          private fun DrawScope.drawAurora(p: Float, bg: Color, a: Float) {
+              drawRect(bg)
+              val w = size.width
+              val h = size.height
+              fun blob(cx: Float, cy: Float, r: Float, c: Color) {
+                  drawCircle(
+                      brush = Brush.radialGradient(listOf(c.copy(alpha = a), Color.Transparent), center = Offset(cx, cy), radius = r),
+                      radius = r, center = Offset(cx, cy)
+                  )
+              }
+              blob(w * (.2f + .15f * sin(p)), h * (.14f + .08f * cos(p)), w * .95f, Azure)
+              blob(w * (.85f + .10f * cos(p)), h * (.46f + .10f * sin(p)), w * .8f, Grape)
+              blob(w * (.30f + .20f * sin(p + 2f)), h * (.88f + .06f * cos(p + 1f)), w * .95f, Mint)
+          }
+
+          /** animate=false => statisch (kein Frame-Loop, spart CPU/Akku). Der Phasenwert wird nur beim Zeichnen gelesen. */
           @Composable
-          fun Aurora(modifier: Modifier = Modifier) {
-              val t = rememberInfiniteTransition(label = "aurora")
-              val p by t.animateFloat(
-                  0f, (2 * PI).toFloat(),
-                  infiniteRepeatable(tween(40000, easing = LinearEasing)), label = "p"
-              )
-              Canvas(modifier) {
-                  drawRect(Ink)
-                  val w = size.width
-                  val h = size.height
-                  fun blob(cx: Float, cy: Float, r: Float, c: Color) {
-                      drawCircle(
-                          brush = Brush.radialGradient(listOf(c.copy(alpha = .48f), Color.Transparent), center = Offset(cx, cy), radius = r),
-                          radius = r, center = Offset(cx, cy)
-                      )
-                  }
-                  blob(w * (.2f + .15f * sin(p)), h * (.14f + .08f * cos(p)), w * .95f, Azure)
-                  blob(w * (.85f + .10f * cos(p)), h * (.46f + .10f * sin(p)), w * .8f, Grape)
-                  blob(w * (.30f + .20f * sin(p + 2f)), h * (.88f + .06f * cos(p + 1f)), w * .95f, Mint.copy(alpha = .8f))
+          fun Aurora(modifier: Modifier = Modifier, animate: Boolean = true) {
+              val pal = LocalPal.current
+              if (animate) {
+                  val t = rememberInfiniteTransition(label = "aurora")
+                  val p by t.animateFloat(
+                      0f, (2 * PI).toFloat(),
+                      infiniteRepeatable(tween(40000, easing = LinearEasing)), label = "p"
+                  )
+                  Canvas(modifier) { drawAurora(p, pal.bg, pal.blob) }
+              } else {
+                  Canvas(modifier) { drawAurora(0.9f, pal.bg, pal.blob) }
               }
           }
 
+          @Composable
           fun Modifier.glass(r: Dp = 28.dp, base: Color = Color.Transparent): Modifier {
+              val p = LocalPal.current
               val s = RoundedCornerShape(r)
               return this
                   .clip(s)
                   .background(base)
-                  .background(Brush.verticalGradient(listOf(Color.White.copy(alpha = .16f), Color.White.copy(alpha = .05f))))
-                  .border(1.dp, Brush.verticalGradient(listOf(Color.White.copy(alpha = .38f), Color.White.copy(alpha = .06f))), s)
+                  .background(Brush.verticalGradient(listOf(p.gTop, p.gBot)))
+                  .border(1.dp, Brush.verticalGradient(listOf(p.bTop, p.bBot)), s)
           }
 
           @Composable
@@ -1208,16 +1691,22 @@ jobs:
               val src = remember { MutableInteractionSource() }
               val pressed by src.collectIsPressedAsState()
               val s by animateFloatAsState(if (pressed) .93f else 1f, spring(dampingRatio = .5f, stiffness = 500f), label = "press")
-              return this.scale(s).clickable(interactionSource = src, indication = null, onClick = onClick)
+              val hf = LocalHapticFeedback.current
+              val hapt = LocalHaptics.current
+              return this.scale(s).clickable(interactionSource = src, indication = null) {
+                  if (hapt) hf.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                  onClick()
+              }
           }
 
           @Composable
           fun Txt(
               t: String, size: Int, w: FontWeight = FontWeight.Normal, a: Float = 1f,
-              color: Color = Color.White, spacing: Float = 0f, modifier: Modifier = Modifier, align: TextAlign? = null
+              color: Color = Color.Unspecified, spacing: Float = 0f, modifier: Modifier = Modifier, align: TextAlign? = null
           ) {
+              val c = if (color == Color.Unspecified) LocalPal.current.fg else color
               Text(
-                  t, modifier, color = color.copy(alpha = a), fontSize = size.sp, fontWeight = w,
+                  t, modifier, color = c.copy(alpha = a), fontSize = size.sp, fontWeight = w,
                   letterSpacing = spacing.sp, textAlign = align
               )
           }
@@ -1259,7 +1748,7 @@ jobs:
                   Txt(title.uppercase(), 11, FontWeight.SemiBold, .55f, spacing = 1f)
                   Spacer(Modifier.height(10.dp))
                   Row(verticalAlignment = Alignment.Bottom) {
-                      Txt(value, 30, FontWeight.Bold, color = accent, spacing = -.5f)
+                      Txt(value, 30, FontWeight.Bold, color = tone(accent), spacing = -.5f)
                       Spacer(Modifier.width(5.dp))
                       Txt(unit, 13, FontWeight.Medium, .6f, modifier = Modifier.padding(bottom = 5.dp))
                   }
@@ -1345,11 +1834,15 @@ jobs:
                       else -> Color.Gray
                   }, tween(400), label = "dot"
               )
-              val inf = rememberInfiniteTransition(label = "pulse")
-              val pulse by inf.animateFloat(
-                  .6f, 1.25f,
-                  infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "pulse"
-              )
+              // Pulsieren nur, wenn die Live-Erkennung laeuft (sonst kein Animations-Loop)
+              val pulse = if (mode == "off") 1f else {
+                  val inf = rememberInfiniteTransition(label = "pulse")
+                  val v by inf.animateFloat(
+                      .6f, 1.25f,
+                      infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "pulse"
+                  )
+                  v
+              }
               val text = when {
                   flash -> "Fake-Schritt erkannt"
                   mode == "run" -> "Laufen · ${Live.cadence} Schritte/min"
@@ -1361,7 +1854,7 @@ jobs:
                   Modifier.fillMaxWidth().glass(24.dp).padding(horizontal = 18.dp, vertical = 14.dp),
                   verticalAlignment = Alignment.CenterVertically
               ) {
-                  Box(Modifier.size(10.dp).scale(if (mode == "off") 1f else pulse).background(col, CircleShape))
+                  Box(Modifier.size(10.dp).scale(pulse).background(col, CircleShape))
                   Spacer(Modifier.width(12.dp))
                   Txt(text, 15, FontWeight.Medium)
               }
@@ -1369,22 +1862,30 @@ jobs:
 
           @Composable
           fun SplitCard(d: Day) {
+              val pal = LocalPal.current
               val tot = max(1, d.real)
               val rf by animateFloatAsState(d.run.toFloat() / tot, tween(900, easing = FastOutSlowInEasing), label = "rf")
               Column(Modifier.fillMaxWidth().glass(26.dp).padding(18.dp)) {
                   Txt("GEHEN & LAUFEN", 11, FontWeight.SemiBold, .55f, spacing = 1f)
                   Spacer(Modifier.height(12.dp))
-                  Row(Modifier.fillMaxWidth().height(14.dp).clip(CircleShape).background(Color.White.copy(alpha = .08f))) {
+                  Row(Modifier.fillMaxWidth().height(14.dp).clip(CircleShape).background(pal.fg.copy(alpha = .08f))) {
                       Box(Modifier.weight(max(.0001f, 1f - rf)).fillMaxHeight().background(Mint))
                       Box(Modifier.weight(max(.0001f, rf)).fillMaxHeight().background(Amber))
                   }
                   Spacer(Modifier.height(12.dp))
                   Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                      Txt("Gehen  ${d.walk.fmt()}", 14, FontWeight.Medium, color = Mint)
-                      Txt("Laufen  ${d.run.fmt()}", 14, FontWeight.Medium, color = Amber)
+                      Txt("Gehen  ${d.walk.fmt()}", 14, FontWeight.Medium, color = tone(Mint))
+                      Txt("Laufen  ${d.run.fmt()}", 14, FontWeight.Medium, color = tone(Amber))
                   }
               }
           }
+
+          @Composable
+          fun switchColors() = SwitchDefaults.colors(
+              checkedTrackColor = Mint, checkedThumbColor = Color.White, checkedBorderColor = Color.Transparent,
+              uncheckedTrackColor = LocalPal.current.fg.copy(alpha = .16f), uncheckedThumbColor = Color.White,
+              uncheckedBorderColor = Color.Transparent
+          )
 
           @Composable
           fun LiveCard(on: Boolean, onToggle: (Boolean) -> Unit) {
@@ -1399,14 +1900,7 @@ jobs:
                       )
                   }
                   Spacer(Modifier.width(12.dp))
-                  Switch(
-                      checked = on, onCheckedChange = onToggle,
-                      colors = SwitchDefaults.colors(
-                          checkedTrackColor = Mint, checkedThumbColor = Color.White, checkedBorderColor = Color.Transparent,
-                          uncheckedTrackColor = Color.White.copy(alpha = .15f), uncheckedThumbColor = Color.White,
-                          uncheckedBorderColor = Color.Transparent
-                      )
-                  )
+                  Switch(checked = on, onCheckedChange = onToggle, colors = switchColors())
               }
           }
 
@@ -1443,7 +1937,7 @@ jobs:
           }
 
           @Composable
-          fun RouteCanvas(pts: List<Pt>, prog: Float, modifier: Modifier) {
+          fun RouteCanvas(pts: List<Pt>, prog: Float, dot: Color, modifier: Modifier) {
               Canvas(modifier) {
                   if (pts.size < 2) return@Canvas
                   val lat0 = pts.map { it.lat }.average()
@@ -1470,12 +1964,13 @@ jobs:
                       drawLine(col.copy(alpha = 1f - .65f * age), pos(i - 1), pos(i), strokeWidth = 5.dp.toPx(), cap = StrokeCap.Round)
                   }
                   drawCircle(Sky.copy(alpha = .35f), 15.dp.toPx(), pos(n))
-                  drawCircle(Color.White, 6.dp.toPx(), pos(n))
+                  drawCircle(dot, 6.dp.toPx(), pos(n))
               }
           }
 
           @Composable
           fun RouteScreen(route: List<Pt>) {
+              val pal = LocalPal.current
               val prog = remember { Animatable(0f) }
               LaunchedEffect(Unit) { prog.animateTo(1f, tween(1500, easing = FastOutSlowInEasing)) }
               val rs = remember(route) { Route.stats(route) }
@@ -1495,7 +1990,7 @@ jobs:
                                   )
                               }
                           } else {
-                              RouteCanvas(route, prog.value, Modifier.fillMaxSize())
+                              RouteCanvas(route, prog.value, pal.fg, Modifier.fillMaxSize())
                           }
                       }
                   }
@@ -1513,7 +2008,8 @@ jobs:
                   }
                   Appear(4) {
                       Txt(
-                          "Cyan = Gehen, Orange = Laufen. Ältere Teile verblassen und werden nach 60 Minuten gelöscht.",
+                          "Blau = Gehen, Orange = Laufen. Ältere Teile verblassen und werden nach 60 Minuten gelöscht. " +
+                              "Export als GPX unter „Mehr“.",
                           12, FontWeight.Normal, .45f, modifier = Modifier.padding(horizontal = 6.dp)
                       )
                   }
@@ -1546,11 +2042,7 @@ jobs:
                                   Box(
                                       Modifier.fillMaxWidth(.78f).height((170f * f).dp)
                                           .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp, bottomStart = 4.dp, bottomEnd = 4.dp))
-                                          .background(
-                                              Brush.verticalGradient(
-                                                  if (reached) listOf(Sky, Mint) else listOf(Azure, Grape)
-                                              )
-                                          )
+                                          .background(Brush.verticalGradient(if (reached) listOf(Sky, Mint) else listOf(Azure, Grape)))
                                   )
                                   Spacer(Modifier.height(8.dp))
                                   Txt(
@@ -1577,6 +2069,7 @@ jobs:
               }
           }
 
+          // ---------------------------------------------------------------- Einstellungen
           @Composable
           fun PermRow(label: String, ok: Boolean) {
               Row(Modifier.fillMaxWidth().padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1588,38 +2081,120 @@ jobs:
           }
 
           @Composable
-          fun SettingsScreen(goal: Int, perms: Perms, onGoal: (Int) -> Unit, onAsk: () -> Unit) {
+          fun SwitchRow(title: String, sub: String, on: Boolean, onChange: (Boolean) -> Unit) {
+              Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                  Column(Modifier.weight(1f)) {
+                      Txt(title, 16, FontWeight.SemiBold)
+                      Txt(sub, 12, FontWeight.Normal, .6f)
+                  }
+                  Spacer(Modifier.width(12.dp))
+                  Switch(checked = on, onCheckedChange = onChange, colors = switchColors())
+              }
+          }
+
+          @Composable
+          fun RoundBtn(t: String, onClick: () -> Unit) {
+              Box(Modifier.size(44.dp).bounceClick(onClick).glass(22.dp), contentAlignment = Alignment.Center) {
+                  Txt(t, 24, FontWeight.Medium)
+              }
+          }
+
+          @Composable
+          fun StepperRow(label: String, value: String, onMinus: () -> Unit, onPlus: () -> Unit) {
+              Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                  Column(Modifier.weight(1f)) {
+                      Txt(label.uppercase(), 11, FontWeight.SemiBold, .55f, spacing = 1f)
+                      Txt(value, 24, FontWeight.Bold, spacing = -.4f)
+                  }
+                  RoundBtn("−", onMinus)
+                  Spacer(Modifier.width(10.dp))
+                  RoundBtn("+", onPlus)
+              }
+          }
+
+          @Composable
+          fun Segmented(opts: List<String>, sel: Int, onSel: (Int) -> Unit) {
+              val pal = LocalPal.current
+              Row(
+                  Modifier.fillMaxWidth().padding(vertical = 6.dp).clip(RoundedCornerShape(16.dp))
+                      .background(pal.fg.copy(alpha = .08f)).padding(4.dp)
+              ) {
+                  opts.forEachIndexed { i, o ->
+                      val a by animateFloatAsState(if (sel == i) 1f else 0f, tween(280, easing = FastOutSlowInEasing), label = "seg")
+                      Box(
+                          Modifier.weight(1f).bounceClick { onSel(i) }
+                              .clip(RoundedCornerShape(12.dp))
+                              .background(pal.fg.copy(alpha = .14f * a))
+                              .padding(vertical = 10.dp),
+                          contentAlignment = Alignment.Center
+                      ) { Txt(o, 14, FontWeight.SemiBold, .55f + .45f * a) }
+                  }
+              }
+          }
+
+          @Composable
+          fun Section(title: String, content: @Composable ColumnScope.() -> Unit) {
+              Column(Modifier.fillMaxWidth().glass(28.dp).padding(horizontal = 18.dp, vertical = 14.dp)) {
+                  Txt(title.uppercase(), 11, FontWeight.SemiBold, .55f, spacing = 1f)
+                  Spacer(Modifier.height(4.dp))
+                  content()
+              }
+          }
+
+          @Composable
+          fun SettingsScreen(
+              st: Settings, perms: Perms, change: (Settings) -> Unit, onAsk: () -> Unit,
+              onHc: (Boolean) -> Unit, onRestore: () -> Unit, onGpx: () -> Unit, onCsv: () -> Unit
+          ) {
               val ctx = LocalContext.current
+              val stepLen = st.height * 0.415 / 100.0
               Screen {
-                  Appear(0) { Title("Mehr", "Ziel, Berechtigungen & Akku") }
+                  Appear(0) { Title("Mehr", "Darstellung, Profil, Sicherung & Export") }
                   Appear(1) {
-                      Row(Modifier.fillMaxWidth().glass(28.dp).padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
-                          Column(Modifier.weight(1f)) {
-                              Txt("TAGESZIEL", 11, FontWeight.SemiBold, .55f, spacing = 1f)
-                              Txt(goal.fmt(), 28, FontWeight.Bold, spacing = -.5f)
-                          }
-                          Box(
-                              Modifier.size(46.dp).bounceClick { onGoal(goal - 500) }.glass(23.dp),
-                              contentAlignment = Alignment.Center
-                          ) { Txt("−", 24, FontWeight.Medium) }
-                          Spacer(Modifier.width(10.dp))
-                          Box(
-                              Modifier.size(46.dp).bounceClick { onGoal(goal + 500) }.glass(23.dp),
-                              contentAlignment = Alignment.Center
-                          ) { Txt("+", 24, FontWeight.Medium) }
+                      Section("Darstellung") {
+                          Segmented(listOf("Auto", "Hell", "Dunkel"), st.theme) { change(st.copy(theme = it)) }
+                          SwitchRow("Animationen reduzieren", "Statischer Hintergrund – spart Akku", st.reduce) { change(st.copy(reduce = it)) }
+                          SwitchRow("Haptisches Feedback", "Vibration bei Ziel, Tippen & Fake-Schritten", st.haptics) { change(st.copy(haptics = it)) }
                       }
                   }
                   Appear(2) {
-                      Column(Modifier.fillMaxWidth().glass(28.dp).padding(18.dp)) {
-                          Txt("BERECHTIGUNGEN", 11, FontWeight.SemiBold, .55f, spacing = 1f)
-                          Spacer(Modifier.height(6.dp))
+                      Section("Ziel & Körper") {
+                          StepperRow("Tagesziel", st.goal.fmt(), { change(st.copy(goal = st.goal - 500)) }, { change(st.copy(goal = st.goal + 500)) })
+                          StepperRow("Körpergröße", "${st.height} cm", { change(st.copy(height = st.height - 1)) }, { change(st.copy(height = st.height + 1)) })
+                          StepperRow("Gewicht", "${st.weight} kg", { change(st.copy(weight = st.weight - 1)) }, { change(st.copy(weight = st.weight + 1)) })
+                          Txt(
+                              "Schrittlänge Gehen ${stepLen.f2()} m · Laufen ${(st.height * 0.60 / 100.0).f2()} m. " +
+                                  "Daraus werden Distanz und Kalorien berechnet.",
+                              12, FontWeight.Normal, .5f
+                          )
+                      }
+                  }
+                  Appear(3) {
+                      Section("Sicherung") {
+                          SwitchRow("Health Connect", "Schritte systemweit sichern & synchronisieren", st.hc, onHc)
+                          if (st.hc) {
+                              Spacer(Modifier.height(4.dp))
+                              GlassButton("Aus Health Connect wiederherstellen") { onRestore() }
+                          }
+                      }
+                  }
+                  Appear(4) {
+                      Section("Export") {
+                          Spacer(Modifier.height(4.dp))
+                          GlassButton("Route als GPX speichern") { onGpx() }
+                          Spacer(Modifier.height(10.dp))
+                          GlassButton("Verlauf als CSV speichern") { onCsv() }
+                      }
+                  }
+                  Appear(5) {
+                      Section("Berechtigungen") {
                           PermRow("Aktivitätserkennung (Schritte)", perms.act)
                           PermRow("Standort (Route)", perms.loc)
                           PermRow("Benachrichtigungen", perms.notif)
                       }
                   }
-                  Appear(3) { GlassButton("Berechtigungen anfragen") { onAsk() } }
-                  Appear(4) {
+                  Appear(6) { GlassButton("Berechtigungen anfragen") { onAsk() } }
+                  Appear(7) {
                       GlassButton("App-Einstellungen öffnen") {
                           try {
                               ctx.startActivity(
@@ -1630,7 +2205,7 @@ jobs:
                           }
                       }
                   }
-                  Appear(5) {
+                  Appear(8) {
                       GlassButton("Akku-Optimierung anpassen") {
                           try {
                               ctx.startActivity(
@@ -1641,11 +2216,11 @@ jobs:
                           }
                       }
                   }
-                  Appear(6) { GlassButton("Route jetzt löschen") { Route.clear(ctx) } }
-                  Appear(7) {
+                  Appear(9) { GlassButton("Route jetzt löschen") { Route.clear(ctx) } }
+                  Appear(10) {
                       Txt(
                           "Stride zählt über den Schrittzähler-Chip deines Handys – dafür muss die App nicht laufen. " +
-                              "Das Widget aktualisiert sich automatisch ca. alle 15 Minuten und beim Öffnen der App.",
+                              "Das Widget aktualisiert sich automatisch ca. alle 15 Minuten (nicht bei sehr niedrigem Akku) und beim Öffnen der App.",
                           12, FontWeight.Normal, .45f, modifier = Modifier.padding(horizontal = 6.dp)
                       )
                   }
@@ -1655,6 +2230,7 @@ jobs:
           // ---------------------------------------------------------------- Tab-Leiste (Glas)
           @Composable
           fun TabBar(sel: Int, onSel: (Int) -> Unit, modifier: Modifier = Modifier) {
+              val pal = LocalPal.current
               val items = listOf(
                   "Heute" to Icons.Rounded.Home,
                   "Route" to Icons.Rounded.Place,
@@ -1663,7 +2239,7 @@ jobs:
               )
               Row(
                   modifier.padding(horizontal = 24.dp, vertical = 12.dp).fillMaxWidth()
-                      .glass(34.dp, base = Color(0xCC0B0E17)).padding(6.dp),
+                      .glass(34.dp, base = pal.bar).padding(6.dp),
                   horizontalArrangement = Arrangement.SpaceBetween
               ) {
                   items.forEachIndexed { i, (label, icon) ->
@@ -1671,14 +2247,14 @@ jobs:
                       Box(
                           Modifier.weight(1f).bounceClick { onSel(i) }
                               .clip(RoundedCornerShape(26.dp))
-                              .background(Color.White.copy(alpha = .14f * a))
+                              .background(pal.fg.copy(alpha = .12f * a))
                               .padding(vertical = 9.dp),
                           contentAlignment = Alignment.Center
                       ) {
                           Column(horizontalAlignment = Alignment.CenterHorizontally) {
                               Icon(
                                   icon, contentDescription = label,
-                                  tint = lerp(Color.White.copy(alpha = .5f), Sky, a),
+                                  tint = lerp(pal.fg.copy(alpha = .5f), pal.accent, a),
                                   modifier = Modifier.size(24.dp).scale(1f + .12f * a)
                               )
                               Txt(label, 11, FontWeight.SemiBold, .5f + .5f * a)

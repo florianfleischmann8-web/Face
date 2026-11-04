@@ -1,618 +1,1696 @@
-name: Build PhoneLink APK
+name: Build Stride APK
+
+# Ablegen als: .github/workflows/build.yml  (Repo kann komplett leer sein)
+# Das komplette Android-Projekt wird unten generiert und zu einer APK gebaut.
+
 on:
   push:
+    branches: [main, master]
   workflow_dispatch:
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
-      - uses: gradle/actions/setup-gradle@v4
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v3
         with:
-          gradle-version: 8.9
-      - name: Projekt erzeugen
+          gradle-version: '8.7'
+
+      # ------------------------------------------------------------------
+      - name: Gradle-Dateien erzeugen
         run: |
-          mkdir -p app/src/main/java/com/phonelink app/src/main/res/xml app/src/main/res/values app/src/main/res/drawable app/src/main/res/mipmap-anydpi-v26 app/src/main/assets
+          mkdir -p app/src/main/java/com/stride/app
+          mkdir -p app/src/main/res/drawable app/src/main/res/layout app/src/main/res/values app/src/main/res/xml app/src/main/res/mipmap-anydpi-v26
+
           cat > settings.gradle.kts <<'EOF'
-          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
-          dependencyResolutionManagement { repositories { google(); mavenCentral() } }
-          rootProject.name = "PhoneLink"
+          pluginManagement {
+              repositories { google(); mavenCentral(); gradlePluginPortal() }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories { google(); mavenCentral() }
+          }
+          rootProject.name = "Stride"
           include(":app")
           EOF
+
           cat > build.gradle.kts <<'EOF'
           plugins {
-              id("com.android.application") version "8.5.2" apply false
+              id("com.android.application") version "8.5.0" apply false
               id("org.jetbrains.kotlin.android") version "1.9.24" apply false
           }
           EOF
+
+          cat > gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          kotlin.code.style=official
+          EOF
+
           cat > app/build.gradle.kts <<'EOF'
-          plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+
           android {
-              namespace = "com.phonelink"
+              namespace = "com.stride.app"
               compileSdk = 34
-              defaultConfig { applicationId = "com.phonelink"; minSdk = 26; targetSdk = 34; versionCode = 1; versionName = "1.0" }
-              compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
+              defaultConfig {
+                  applicationId = "com.stride.app"
+                  minSdk = 26
+                  targetSdk = 34
+                  versionCode = 1
+                  versionName = "1.0"
+              }
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
               kotlinOptions { jvmTarget = "17" }
+              buildFeatures { compose = true }
+              composeOptions { kotlinCompilerExtensionVersion = "1.5.14" }
+              packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
+          }
+
+          dependencies {
+              implementation("androidx.core:core-ktx:1.13.1")
+              implementation("androidx.activity:activity-compose:1.9.0")
+              implementation(platform("androidx.compose:compose-bom:2024.06.00"))
+              implementation("androidx.compose.ui:ui")
+              implementation("androidx.compose.ui:ui-graphics")
+              implementation("androidx.compose.foundation:foundation")
+              implementation("androidx.compose.animation:animation")
+              implementation("androidx.compose.material3:material3")
+              implementation("androidx.compose.material:material-icons-extended")
+              implementation("androidx.work:work-runtime-ktx:2.9.0")
+              implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
           }
           EOF
-          cat > app/src/main/res/values/strings.xml <<'EOF'
-          <resources><string name="desc">Erlaubt PhoneLink, dein Handy von deinem iPad aus zu bedienen (tippen, wischen, Tasten, Text).</string></resources>
-          EOF
-          cat > app/src/main/res/xml/accessibility.xml <<'EOF'
-          <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-              android:description="@string/desc"
-              android:accessibilityEventTypes="typeWindowStateChanged"
-              android:accessibilityFeedbackType="feedbackGeneric"
-              android:canPerformGestures="true"
-              android:canRetrieveWindowContent="true"
-              android:notificationTimeout="100" />
-          EOF
-          cat > app/src/main/res/drawable/ic_bg.xml <<'EOF'
-          <vector xmlns:android="http://schemas.android.com/apk/res/android" xmlns:aapt="http://schemas.android.com/aapt"
-              android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
-              <path android:pathData="M0,0h108v108h-108z">
-                  <aapt:attr name="android:fillColor">
-                      <gradient android:type="linear" android:startX="0" android:startY="0" android:endX="108" android:endY="108">
-                          <item android:offset="0" android:color="#0D1B24" />
-                          <item android:offset="1" android:color="#1E3A8A" />
-                      </gradient>
-                  </aapt:attr>
-              </path>
-          </vector>
-          EOF
-          cat > app/src/main/res/drawable/ic_fg.xml <<'EOF'
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
-              <path android:pathData="M36,33h14a5,5 0 0 1 5,5v32a5,5 0 0 1 -5,5h-14a5,5 0 0 1 -5,-5v-32a5,5 0 0 1 5,-5z"
-                  android:strokeColor="#FFFFFF" android:strokeWidth="3.6" android:fillColor="#00000000" />
-              <path android:pathData="M43,54m-3,0a3,3 0 1 0 6,0a3,3 0 1 0 -6,0" android:fillColor="#FFFFFF" />
-              <path android:pathData="M66.36,47.64A9,9 0 0 1 66.36,60.36" android:strokeColor="#FFB84D" android:strokeWidth="4.4" android:strokeLineCap="round" />
-              <path android:pathData="M72.02,41.98A17,17 0 0 1 72.02,66.02" android:strokeColor="#5CE1C6" android:strokeWidth="4.4" android:strokeLineCap="round" />
-              <path android:pathData="M77.68,36.32A25,25 0 0 1 77.68,71.68" android:strokeColor="#7AA2FF" android:strokeWidth="4.4" android:strokeLineCap="round" />
-          </vector>
-          EOF
-          cat > app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml <<'EOF'
-          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-              <background android:drawable="@drawable/ic_bg" />
-              <foreground android:drawable="@drawable/ic_fg" />
-          </adaptive-icon>
-          EOF
+
+      # ------------------------------------------------------------------
+      - name: Manifest und Ressourcen (Logo, Widget-Glas) erzeugen
+        run: |
           cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              <uses-permission android:name="android.permission.INTERNET" />
+
+              <uses-feature android:name="android.hardware.sensor.stepcounter" android:required="false" />
+
+              <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+              <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+              <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
               <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-              <application android:label="PhoneLink" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher" android:theme="@android:style/Theme.Material.NoActionBar" android:usesCleartextTraffic="true">
-                  <activity android:name=".MainActivity" android:exported="true">
+              <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+              <application
+                  android:allowBackup="true"
+                  android:icon="@mipmap/ic_launcher"
+                  android:roundIcon="@mipmap/ic_launcher"
+                  android:label="@string/app_name"
+                  android:supportsRtl="true"
+                  android:theme="@style/Theme.Stride">
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:windowSoftInputMode="adjustResize">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
                           <category android:name="android.intent.category.LAUNCHER" />
                       </intent-filter>
                   </activity>
-                  <service android:name=".MirrorService" android:exported="false" android:foregroundServiceType="mediaProjection" />
-                  <service android:name=".ControlService" android:exported="true" android:label="PhoneLink Fernsteuerung"
-                      android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
-                      <intent-filter><action android:name="android.accessibilityservice.AccessibilityService" /></intent-filter>
-                      <meta-data android:name="android.accessibilityservice" android:resource="@xml/accessibility" />
-                  </service>
+
+                  <service
+                      android:name=".TrackingService"
+                      android:exported="false"
+                      android:foregroundServiceType="location" />
+
+                  <receiver android:name=".StepWidget" android:exported="false">
+                      <intent-filter>
+                          <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                      </intent-filter>
+                      <meta-data
+                          android:name="android.appwidget.provider"
+                          android:resource="@xml/widget_info" />
+                  </receiver>
+
+                  <receiver android:name=".BootReceiver" android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.BOOT_COMPLETED" />
+                      </intent-filter>
+                  </receiver>
               </application>
           </manifest>
           EOF
-          cat > app/src/main/java/com/phonelink/ControlService.kt <<'EOF'
-          package com.phonelink
 
-          import android.accessibilityservice.AccessibilityService
-          import android.accessibilityservice.GestureDescription
-          import android.graphics.Path
-          import android.os.Bundle
-          import android.os.Handler
-          import android.os.Looper
-          import android.os.SystemClock
-          import android.view.accessibility.AccessibilityEvent
-          import android.view.accessibility.AccessibilityNodeInfo
-
-          class ControlService : AccessibilityService() {
-              companion object { @Volatile var inst: ControlService? = null }
-              override fun onServiceConnected() { inst = this }
-              override fun onDestroy() { inst = null; super.onDestroy() }
-              override fun onAccessibilityEvent(e: AccessibilityEvent?) {}
-              override fun onInterrupt() {}
-
-              fun gesture(x1: Float, y1: Float, x2: Float, y2: Float, dur: Long) {
-                  val p = Path().apply { moveTo(x1, y1); if (x1 != x2 || y1 != y2) lineTo(x2, y2) }
-                  val g = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(p, 0, maxOf(dur, 1L))).build()
-                  dispatchGesture(g, null, null)
-              }
-              private class P(var cx: Float, var cy: Float, var tx: Float, var ty: Float) {
-                  var stroke: GestureDescription.StrokeDescription? = null
-                  var ending = false
-                  var started = false
-              }
-              private val ptrs = LinkedHashMap<Int, P>()
-              private val main = Handler(Looper.getMainLooper())
-              private var busy = false
-              private var lastT = 0L
-
-              fun touch(t: String, id: Int, x: Float, y: Float) {
-                  main.post {
-                      when (t) {
-                          "d" -> ptrs[id] = P(x, y, x, y)
-                          "m" -> ptrs[id]?.let { it.tx = x; it.ty = y }
-                          "u" -> ptrs[id]?.let { it.tx = x; it.ty = y; it.ending = true }
-                      }
-                      pump()
-                  }
-              }
-
-              private fun pump() {
-                  if (busy) return
-                  if (ptrs.values.none { !it.started || it.cx != it.tx || it.cy != it.ty || it.ending }) return
-                  val now = SystemClock.uptimeMillis()
-                  val dur = if (lastT == 0L) 30L else (now - lastT).coerceIn(20L, 80L)
-                  lastT = now
-                  val b = GestureDescription.Builder()
-                  for (p in ptrs.values) {
-                      val path = Path().apply { moveTo(p.cx, p.cy); if (p.tx != p.cx || p.ty != p.cy) lineTo(p.tx, p.ty) }
-                      val cont = !p.ending
-                      val s = p.stroke?.continueStroke(path, 0L, dur, cont) ?: GestureDescription.StrokeDescription(path, 0L, dur, cont)
-                      p.stroke = s; p.cx = p.tx; p.cy = p.ty; p.started = true
-                      b.addStroke(s)
-                  }
-                  busy = true
-                  val ok = dispatchGesture(b.build(), object : AccessibilityService.GestureResultCallback() {
-                      override fun onCompleted(g: GestureDescription?) {
-                          busy = false
-                          ptrs.values.removeAll { it.ending }
-                          if (ptrs.isEmpty()) lastT = 0L
-                          pump()
-                      }
-                      override fun onCancelled(g: GestureDescription?) { busy = false; ptrs.clear(); lastT = 0L }
-                  }, main)
-                  if (!ok) { busy = false; ptrs.clear() }
-              }
-
-              fun key(n: String) {
-                  performGlobalAction(when (n) {
-                      "back" -> GLOBAL_ACTION_BACK
-                      "home" -> GLOBAL_ACTION_HOME
-                      "recents" -> GLOBAL_ACTION_RECENTS
-                      else -> GLOBAL_ACTION_NOTIFICATIONS
-                  })
-              }
-              fun setText(t: String) {
-                  val n = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return
-                  n.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply {
-                      putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, t)
-                  })
-              }
-          }
+          cat > app/src/main/res/values/strings.xml <<'EOF'
+          <resources>
+              <string name="app_name">Stride</string>
+              <string name="widget_desc">Deine Schritte im Glas-Design</string>
+          </resources>
           EOF
-          cat > app/src/main/java/com/phonelink/WebServer.kt <<'EOF'
-          package com.phonelink
+
+          cat > app/src/main/res/values/colors.xml <<'EOF'
+          <resources>
+              <color name="ink">#080A12</color>
+          </resources>
+          EOF
+
+          cat > app/src/main/res/values/themes.xml <<'EOF'
+          <resources>
+              <style name="Theme.Stride" parent="android:Theme.Material.NoActionBar">
+                  <item name="android:windowBackground">@color/ink</item>
+                  <item name="android:statusBarColor">@android:color/transparent</item>
+                  <item name="android:navigationBarColor">@android:color/transparent</item>
+              </style>
+          </resources>
+          EOF
+
+          # ---------- App-Logo (Adaptive Icon: Ring + Fussabdruecke) ----------
+          cat > app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@drawable/ic_launcher_background" />
+              <foreground android:drawable="@drawable/ic_launcher_foreground" />
+          </adaptive-icon>
+          EOF
+
+          cat > app/src/main/res/drawable/ic_launcher_background.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+              <gradient android:startColor="#222F5B" android:endColor="#05070D" android:angle="315" />
+          </shape>
+          EOF
+
+          cat > app/src/main/res/drawable/ic_launcher_foreground.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              xmlns:aapt="http://schemas.android.com/aapt"
+              android:width="108dp"
+              android:height="108dp"
+              android:viewportWidth="108"
+              android:viewportHeight="108">
+              <path
+                  android:pathData="M54,30 A24,24 0 1,1 54,78 A24,24 0 1,1 54,30"
+                  android:strokeWidth="6"
+                  android:strokeLineCap="round"
+                  android:fillColor="#00000000">
+                  <aapt:attr name="android:strokeColor">
+                      <gradient
+                          android:startX="30" android:startY="30"
+                          android:endX="78" android:endY="78"
+                          android:type="linear">
+                          <item android:offset="0" android:color="#30D158" />
+                          <item android:offset="0.5" android:color="#64D2FF" />
+                          <item android:offset="1" android:color="#BF5AF2" />
+                      </gradient>
+                  </aapt:attr>
+              </path>
+              <path android:fillColor="#FFFFFF" android:pathData="M43,60 a5,8 0 1,0 10,0 a5,8 0 1,0 -10,0" />
+              <path android:fillColor="#FFFFFF" android:pathData="M55,48 a5,8 0 1,0 10,0 a5,8 0 1,0 -10,0" />
+          </vector>
+          EOF
+
+          cat > app/src/main/res/drawable/ic_stat.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp" android:height="24dp"
+              android:viewportWidth="24" android:viewportHeight="24">
+              <path android:fillColor="#FFFFFF" android:pathData="M12,12m-6,0a6,6 0 1,0 12,0a6,6 0 1,0 -12,0" />
+          </vector>
+          EOF
+
+          # ---------- Widget (Glas-Design) ----------
+          cat > app/src/main/res/drawable/widget_glass.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+              <item>
+                  <shape android:shape="rectangle">
+                      <gradient android:startColor="#B31E2A4A" android:endColor="#B30A0E1B" android:angle="315" />
+                      <corners android:radius="28dp" />
+                      <stroke android:width="1dp" android:color="#47FFFFFF" />
+                  </shape>
+              </item>
+              <item>
+                  <shape android:shape="rectangle">
+                      <gradient android:startColor="#2EFFFFFF" android:endColor="#00FFFFFF" android:angle="270" />
+                      <corners android:radius="28dp" />
+                  </shape>
+              </item>
+          </layer-list>
+          EOF
+
+          cat > app/src/main/res/drawable/widget_bar.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+              <item android:id="@android:id/background">
+                  <shape android:shape="rectangle">
+                      <solid android:color="#33FFFFFF" />
+                      <corners android:radius="4dp" />
+                  </shape>
+              </item>
+              <item android:id="@android:id/progress">
+                  <clip>
+                      <shape android:shape="rectangle">
+                          <gradient android:startColor="#30D158" android:endColor="#64D2FF" android:angle="0" />
+                          <corners android:radius="4dp" />
+                      </shape>
+                  </clip>
+              </item>
+          </layer-list>
+          EOF
+
+          cat > app/src/main/res/layout/widget_steps.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:id="@+id/w_root"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:background="@drawable/widget_glass"
+              android:gravity="center_vertical"
+              android:orientation="vertical"
+              android:padding="18dp">
+
+              <TextView
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:letterSpacing="0.12"
+                  android:text="SCHRITTE HEUTE"
+                  android:textColor="#99FFFFFF"
+                  android:textSize="11sp"
+                  android:textStyle="bold" />
+
+              <TextView
+                  android:id="@+id/w_steps"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:text="0"
+                  android:textColor="#FFFFFF"
+                  android:textSize="40sp"
+                  android:textStyle="bold" />
+
+              <ProgressBar
+                  android:id="@+id/w_bar"
+                  style="?android:attr/progressBarStyleHorizontal"
+                  android:layout_width="match_parent"
+                  android:layout_height="8dp"
+                  android:layout_marginTop="4dp"
+                  android:indeterminate="false"
+                  android:max="100"
+                  android:progress="0"
+                  android:progressDrawable="@drawable/widget_bar" />
+
+              <LinearLayout
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:layout_marginTop="10dp"
+                  android:orientation="horizontal">
+
+                  <TextView
+                      android:id="@+id/w_km"
+                      android:layout_width="0dp"
+                      android:layout_height="wrap_content"
+                      android:layout_weight="1"
+                      android:textColor="#E6FFFFFF"
+                      android:textSize="13sp"
+                      android:textStyle="bold" />
+
+                  <TextView
+                      android:id="@+id/w_kcal"
+                      android:layout_width="0dp"
+                      android:layout_height="wrap_content"
+                      android:layout_weight="1"
+                      android:textColor="#E6FFFFFF"
+                      android:textSize="13sp"
+                      android:textStyle="bold" />
+
+                  <TextView
+                      android:id="@+id/w_pct"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:textColor="#FF64D2FF"
+                      android:textSize="13sp"
+                      android:textStyle="bold" />
+              </LinearLayout>
+          </LinearLayout>
+          EOF
+
+          cat > app/src/main/res/xml/widget_info.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+              android:description="@string/widget_desc"
+              android:initialLayout="@layout/widget_steps"
+              android:minWidth="180dp"
+              android:minHeight="110dp"
+              android:resizeMode="horizontal|vertical"
+              android:updatePeriodMillis="1800000"
+              android:widgetCategory="home_screen" />
+          EOF
+
+      # ------------------------------------------------------------------
+      - name: Kotlin - Datenhaltung, Widget, Hintergrund-Sync
+        run: |
+          cat > app/src/main/java/com/stride/app/Store.kt <<'EOF'
+          package com.stride.app
 
           import android.content.Context
-          import android.util.Base64
-          import java.io.DataInputStream
-          import java.io.InputStream
-          import java.io.OutputStream
-          import java.security.MessageDigest
-          import java.net.InetSocketAddress
-          import java.net.ServerSocket
-          import java.net.Socket
-          import java.net.URLDecoder
-          import kotlin.concurrent.thread
+          import android.content.SharedPreferences
+          import org.json.JSONArray
+          import java.io.File
+          import java.time.LocalDate
+          import kotlin.math.*
 
-          object Shared {
-              val pin = (100000..999999).random().toString()
-              @Volatile var running = false
-              @Volatile var w = 0
-              @Volatile var h = 0
-              @Volatile var frame: ByteArray? = null
-              @Volatile var seq = 0L
+          data class Day(val date: String, val total: Int, val fake: Int, val run: Int) {
+              val real: Int get() = max(0, total - fake)
+              val walk: Int get() = max(0, real - run)
+              val km: Double get() = (walk * 0.72 + run * 1.05) / 1000.0
+              val kcal: Int get() = (walk * 0.72 * 0.045 + run * 1.05 * 0.07).roundToInt()
           }
 
-          class WebServer(private val ctx: Context) {
-              private var ss: ServerSocket? = null
+          object Store {
+              private fun sp(c: Context): SharedPreferences =
+                  c.applicationContext.getSharedPreferences("stride", Context.MODE_PRIVATE)
 
-              fun start() {
-                  ss = ServerSocket().apply { reuseAddress = true; bind(InetSocketAddress(8080)) }
-                  thread(isDaemon = true) {
-                      try { while (true) { val s = ss!!.accept(); s.tcpNoDelay = true; thread(isDaemon = true) { handle(s) } } } catch (e: Exception) {}
+              private fun key(d: String, k: String) = "d_${d}_$k"
+              fun todayKey(): String = LocalDate.now().toString()
+
+              /** Hardware-Schrittzaehler (laeuft im Sensor-Chip, auch wenn die App nicht laeuft) */
+              @Synchronized
+              fun sync(c: Context, counter: Float) {
+                  val s = sp(c)
+                  val last = s.getLong("last_counter", -1L)
+                  val cur = counter.toLong()
+                  val delta = if (last < 0) 0L else if (cur >= last) cur - last else cur // cur < last => Neustart
+                  val e = s.edit().putLong("last_counter", cur)
+                  if (delta > 0) {
+                      val k = key(todayKey(), "total")
+                      e.putInt(k, s.getInt(k, 0) + delta.toInt())
                   }
-              }
-              fun stop() { try { ss?.close() } catch (e: Exception) {} }
-
-              private fun resp(o: OutputStream, code: Int, type: String, b: ByteArray) {
-                  o.write("HTTP/1.1 $code OK\r\nContent-Type: $type\r\nContent-Length: ${b.size}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n".toByteArray())
-                  o.write(b); o.flush()
+                  e.apply()
               }
 
-              private fun handle(sock: Socket) {
-                  try {
-                      sock.use {
-                          val inp = it.getInputStream().bufferedReader(Charsets.ISO_8859_1)
-                          val line = inp.readLine() ?: return
-                          var wsKey: String? = null
-                          while (true) { val h = inp.readLine(); if (h.isNullOrEmpty()) break; if (h.startsWith("Sec-WebSocket-Key:", true)) wsKey = h.substringAfter(":").trim() }
-                          val target = line.split(" ").getOrElse(1) { "/" }
-                          val path = target.substringBefore("?")
-                          val q = HashMap<String, String>()
-                          target.substringAfter("?", "").split("&").forEach { p ->
-                              val kv = p.split("=", limit = 2)
-                              if (kv.size == 2) q[kv[0]] = URLDecoder.decode(kv[1], "UTF-8")
-                          }
-                          val out = it.getOutputStream()
-                          if (path == "/") { resp(out, 200, "text/html; charset=utf-8", ctx.assets.open("index.html").readBytes()); return }
-                          if (q["k"] != Shared.pin) { resp(out, 403, "text/plain", "PIN falsch".toByteArray()); return }
-                          val c = ControlService.inst
-                          val W = Shared.w.toFloat(); val H = Shared.h.toFloat()
-                          fun f(n: String) = q[n]?.toFloatOrNull() ?: 0f
-                          when (path) {
-                              "/stream" -> { stream(out); return }
-                              "/ws" -> { ws(it.getInputStream(), out, wsKey); return }
-                              "/info" -> { resp(out, 200, "application/json", "{\"w\":${Shared.w},\"h\":${Shared.h},\"ctl\":${c != null}}".toByteArray()); return }
-                              "/tap" -> c?.gesture(f("x") * W, f("y") * H, f("x") * W, f("y") * H, 40)
-                              "/long" -> c?.gesture(f("x") * W, f("y") * H, f("x") * W, f("y") * H, 700)
-                              "/swipe" -> c?.gesture(f("x1") * W, f("y1") * H, f("x2") * W, f("y2") * H, q["d"]?.toLongOrNull() ?: 250)
-                              "/key" -> c?.key(q["name"] ?: "")
-                              "/text" -> c?.setText(q["t"] ?: "")
-                          }
-                          resp(out, 200, "text/plain", "ok".toByteArray())
+              @Synchronized fun addFake(c: Context) = inc(c, "fake")
+              @Synchronized fun addRun(c: Context) = inc(c, "run")
+
+              private fun inc(c: Context, k: String) {
+                  val s = sp(c)
+                  val kk = key(todayKey(), k)
+                  s.edit().putInt(kk, s.getInt(kk, 0) + 1).apply()
+              }
+
+              fun day(c: Context, d: String): Day {
+                  val s = sp(c)
+                  return Day(d, s.getInt(key(d, "total"), 0), s.getInt(key(d, "fake"), 0), s.getInt(key(d, "run"), 0))
+              }
+
+              fun today(c: Context): Day = day(c, todayKey())
+              fun goal(c: Context): Int = sp(c).getInt("goal", 10000)
+              fun setGoal(c: Context, g: Int) = sp(c).edit().putInt("goal", g.coerceIn(1000, 50000)).apply()
+              fun tracking(c: Context): Boolean = sp(c).getBoolean("tracking", false)
+              fun setTracking(c: Context, on: Boolean) = sp(c).edit().putBoolean("tracking", on).apply()
+          }
+
+          data class Pt(val lat: Double, val lon: Double, val t: Long, val seg: Int, val run: Boolean)
+          data class RouteStats(val distM: Double, val timeS: Double, val avgKmh: Double)
+
+          /** Lauftour der letzten Stunde. Nur aktive Abschnitte, alles Aeltere wird geloescht. */
+          object Route {
+              private const val HOUR = 3_600_000L
+              private fun file(c: Context) = File(c.applicationContext.filesDir, "route.json")
+
+              @Synchronized
+              fun load(c: Context): List<Pt> {
+                  val f = file(c)
+                  if (!f.exists()) return emptyList()
+                  return try {
+                      val a = JSONArray(f.readText())
+                      val cutoff = System.currentTimeMillis() - HOUR
+                      val all = (0 until a.length()).map {
+                          val o = a.getJSONArray(it)
+                          Pt(o.getDouble(0), o.getDouble(1), o.getLong(2), o.getInt(3), o.getInt(4) == 1)
                       }
-                  } catch (e: Exception) {}
-              }
-
-              private fun ws(inp: InputStream, out: OutputStream, key: String?) {
-                  if (key == null) return
-                  val acc = Base64.encodeToString(MessageDigest.getInstance("SHA-1").digest((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").toByteArray()), Base64.NO_WRAP)
-                  out.write("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: $acc\r\n\r\n".toByteArray())
-                  out.flush()
-                  val din = DataInputStream(inp)
-                  while (Shared.running) {
-                      val b0 = din.readUnsignedByte(); val b1 = din.readUnsignedByte()
-                      var len = (b1 and 0x7F).toLong()
-                      if (len == 126L) len = din.readUnsignedShort().toLong() else if (len == 127L) len = din.readLong()
-                      if (len > 100000L) return
-                      val mask = if ((b1 and 0x80) != 0) ByteArray(4).also { din.readFully(it) } else null
-                      val buf = ByteArray(len.toInt()); din.readFully(buf)
-                      if (mask != null) for (i in buf.indices) buf[i] = (buf[i].toInt() xor mask[i % 4].toInt()).toByte()
-                      when (b0 and 0x0F) {
-                          1 -> touchMsg(String(buf, Charsets.UTF_8))
-                          8 -> return
-                          9 -> synchronized(out) { out.write(byteArrayOf(0x8A.toByte(), 0)); out.flush() }
-                      }
+                      val keep = all.filter { it.t >= cutoff }
+                      if (keep.size != all.size) save(c, keep)
+                      keep
+                  } catch (e: Exception) {
+                      emptyList()
                   }
               }
 
-              private fun touchMsg(m: String) {
-                  val p = m.split(" ")
-                  val c = ControlService.inst ?: return
-                  try { c.touch(p[0], p[1].toInt(), p[2].toFloat() * Shared.w, p[3].toFloat() * Shared.h) } catch (e: Exception) {}
+              @Synchronized
+              fun save(c: Context, pts: List<Pt>) {
+                  val a = JSONArray()
+                  pts.forEach { a.put(JSONArray().put(it.lat).put(it.lon).put(it.t).put(it.seg).put(if (it.run) 1 else 0)) }
+                  file(c).writeText(a.toString())
               }
 
-              private fun stream(out: OutputStream) {
-                  out.write("HTTP/1.1 200 OK\r\nContent-Type: multipart/x-mixed-replace; boundary=f\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n".toByteArray())
-                  var last = -1L
-                  while (Shared.running) {
-                      val f = Shared.frame; val s = Shared.seq
-                      if (f != null && s != last) {
-                          last = s
-                          out.write("--f\r\nContent-Type: image/jpeg\r\nContent-Length: ${f.size}\r\n\r\n".toByteArray())
-                          out.write(f); out.write("\r\n".toByteArray()); out.flush()
-                      } else Thread.sleep(3)
+              @Synchronized
+              fun add(c: Context, p: Pt) {
+                  val cutoff = System.currentTimeMillis() - HOUR
+                  save(c, (load(c) + p).filter { it.t >= cutoff })
+              }
+
+              /** Zu kurze Abschnitte (kein echtes Laufen) werden verworfen. */
+              @Synchronized
+              fun dropShortSegment(c: Context, seg: Int) {
+                  val l = load(c)
+                  if (l.count { it.seg == seg } < 3) save(c, l.filter { it.seg != seg })
+              }
+
+              @Synchronized fun clear(c: Context) { file(c).delete() }
+
+              fun dist(a: Pt, b: Pt): Double {
+                  val r = 6371000.0
+                  val p1 = Math.toRadians(a.lat)
+                  val p2 = Math.toRadians(b.lat)
+                  val dp = p2 - p1
+                  val dl = Math.toRadians(b.lon - a.lon)
+                  val h = sin(dp / 2).pow(2) + cos(p1) * cos(p2) * sin(dl / 2).pow(2)
+                  return 2 * r * asin(min(1.0, sqrt(h)))
+              }
+
+              fun stats(p: List<Pt>): RouteStats {
+                  var d = 0.0
+                  var t = 0.0
+                  for (i in 1 until p.size) {
+                      val a = p[i - 1]
+                      val b = p[i]
+                      if (a.seg != b.seg) continue
+                      val dt = (b.t - a.t) / 1000.0
+                      if (dt < 0.5 || dt > 30) continue
+                      val dd = dist(a, b)
+                      if (dd / dt > 8.0) continue
+                      d += dd
+                      t += dt
+                  }
+                  return RouteStats(d, t, if (t > 0) d / t * 3.6 else 0.0)
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/stride/app/Background.kt <<'EOF'
+          package com.stride.app
+
+          import android.content.BroadcastReceiver
+          import android.content.Context
+          import android.content.Intent
+          import android.hardware.Sensor
+          import android.hardware.SensorEvent
+          import android.hardware.SensorEventListener
+          import android.hardware.SensorManager
+          import androidx.work.CoroutineWorker
+          import androidx.work.ExistingPeriodicWorkPolicy
+          import androidx.work.OneTimeWorkRequestBuilder
+          import androidx.work.PeriodicWorkRequestBuilder
+          import androidx.work.WorkManager
+          import androidx.work.WorkerParameters
+          import kotlinx.coroutines.suspendCancellableCoroutine
+          import kotlinx.coroutines.withTimeoutOrNull
+          import java.util.concurrent.TimeUnit
+          import kotlin.coroutines.resume
+
+          /** Liest EINMAL den Hardware-Zaehler (zaehlt im Sensor-Chip, die App muss dafuer nicht laufen). */
+          object Counter {
+              suspend fun read(c: Context): Float? = withTimeoutOrNull(6000L) {
+                  suspendCancellableCoroutine<Float?> { cont ->
+                      val sm = c.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+                      val sensor = sm.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
+                      if (sensor == null) {
+                          cont.resume(null)
+                      } else {
+                          val l = object : SensorEventListener {
+                              override fun onSensorChanged(e: SensorEvent) {
+                                  sm.unregisterListener(this)
+                                  if (cont.isActive) cont.resume(e.values[0])
+                              }
+                              override fun onAccuracyChanged(x: Sensor?, a: Int) {}
+                          }
+                          sm.registerListener(l, sensor, SensorManager.SENSOR_DELAY_NORMAL)
+                          cont.invokeOnCancellation { sm.unregisterListener(l) }
+                      }
+                  }
+              }
+          }
+
+          class SyncWorker(c: Context, p: WorkerParameters) : CoroutineWorker(c, p) {
+              override suspend fun doWork(): Result {
+                  val v = Counter.read(applicationContext)
+                  if (v != null) Store.sync(applicationContext, v)
+                  StepWidget.updateAll(applicationContext)
+                  return Result.success()
+              }
+          }
+
+          object Scheduler {
+              fun schedule(c: Context) {
+                  val req = PeriodicWorkRequestBuilder<SyncWorker>(15, TimeUnit.MINUTES).build()
+                  WorkManager.getInstance(c.applicationContext)
+                      .enqueueUniquePeriodicWork("stride_sync", ExistingPeriodicWorkPolicy.KEEP, req)
+              }
+
+              fun now(c: Context) {
+                  WorkManager.getInstance(c.applicationContext).enqueue(OneTimeWorkRequestBuilder<SyncWorker>().build())
+              }
+          }
+
+          class BootReceiver : BroadcastReceiver() {
+              override fun onReceive(c: Context, i: Intent?) {
+                  Scheduler.schedule(c)
+                  Scheduler.now(c)
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/stride/app/StepWidget.kt <<'EOF'
+          package com.stride.app
+
+          import android.app.PendingIntent
+          import android.appwidget.AppWidgetManager
+          import android.appwidget.AppWidgetProvider
+          import android.content.ComponentName
+          import android.content.Context
+          import android.content.Intent
+          import android.widget.RemoteViews
+          import java.util.Locale
+          import kotlin.math.max
+          import kotlin.math.min
+
+          class StepWidget : AppWidgetProvider() {
+
+              override fun onUpdate(c: Context, m: AppWidgetManager, ids: IntArray) {
+                  ids.forEach { render(c, m, it) }
+                  Scheduler.now(c)
+              }
+
+              override fun onEnabled(c: Context) {
+                  Scheduler.schedule(c)
+              }
+
+              companion object {
+                  fun updateAll(c: Context) {
+                      val m = AppWidgetManager.getInstance(c)
+                      m.getAppWidgetIds(ComponentName(c, StepWidget::class.java)).forEach { render(c, m, it) }
+                  }
+
+                  fun render(c: Context, m: AppWidgetManager, id: Int) {
+                      val d = Store.today(c)
+                      val goal = max(1, Store.goal(c))
+                      val pct = min(100, d.real * 100 / goal)
+                      val v = RemoteViews(c.packageName, R.layout.widget_steps)
+                      v.setTextViewText(R.id.w_steps, String.format(Locale.GERMAN, "%,d", d.real))
+                      v.setProgressBar(R.id.w_bar, 100, pct, false)
+                      v.setTextViewText(R.id.w_km, String.format(Locale.GERMAN, "%.2f km", d.km))
+                      v.setTextViewText(R.id.w_kcal, "${d.kcal} kcal")
+                      v.setTextViewText(R.id.w_pct, "$pct %")
+                      val pi = PendingIntent.getActivity(
+                          c, 0, Intent(c, MainActivity::class.java),
+                          PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                      )
+                      v.setOnClickPendingIntent(R.id.w_root, pi)
+                      m.updateAppWidget(id, v)
                   }
               }
           }
           EOF
-          cat > app/src/main/java/com/phonelink/MirrorService.kt <<'EOF'
-          package com.phonelink
 
-          import android.app.*
+      # ------------------------------------------------------------------
+      - name: Kotlin - Erkennung (Fake/Echt, Gehen/Rennen) und Live-Service
+        run: |
+          cat > app/src/main/java/com/stride/app/Engine.kt <<'EOF'
+          package com.stride.app
+
+          import android.os.SystemClock
+          import androidx.compose.runtime.getValue
+          import androidx.compose.runtime.mutableIntStateOf
+          import androidx.compose.runtime.mutableLongStateOf
+          import androidx.compose.runtime.mutableStateOf
+          import androidx.compose.runtime.setValue
+          import kotlin.math.max
+          import kotlin.math.min
+          import kotlin.math.roundToInt
+          import kotlin.math.sqrt
+
+          /** Live-Zustand, den die UI beobachtet. */
+          object Live {
+              var mode by mutableStateOf("idle")        // idle | walk | run
+              var cadence by mutableIntStateOf(0)       // Schritte pro Minute
+              var running by mutableStateOf(false)
+              var fakeFlash by mutableLongStateOf(0L)
+              var gps by mutableStateOf(false)
+          }
+
+          /**
+           * Prueft jeden Hardware-Schritt gegen den Beschleunigungssensor:
+           *  - zu wenig Bewegung        -> Fake (App/Emulator/Tippen auf dem Tisch)
+           *  - unmenschlich schnell     -> Fake
+           *  - unregelmaessiger Rhythmus-> Fake (Schuetteln)
+           *  - extreme Amplitude        -> Fake (heftiges Schuetteln)
+           * Danach Unterscheidung Gehen / Laufen ueber Kadenz + Aufprallstaerke.
+           */
+          class Detector(private val onReal: (Boolean) -> Unit, private val onFake: () -> Unit) {
+              private class S(val t: Long, val m: Float)
+
+              private val buf = ArrayDeque<S>()
+              private val steps = ArrayDeque<Long>()
+
+              var lastRealAt = 0L
+                  private set
+
+              fun onAccel(t: Long, x: Float, y: Float, z: Float) {
+                  buf.addLast(S(t, sqrt(x * x + y * y + z * z)))
+                  while (buf.isNotEmpty() && t - buf.first().t > 1200) buf.removeFirst()
+              }
+
+              fun onStep(t: Long) {
+                  var mn = Float.MAX_VALUE
+                  var mx = 0f
+                  var n = 0
+                  for (s in buf) {
+                      val dt0 = t - s.t
+                      if (dt0 >= 0 && dt0 <= 700) {
+                          mn = min(mn, s.m)
+                          mx = max(mx, s.m)
+                          n++
+                      }
+                  }
+                  val amp = if (n >= 3) mx - mn else 0f
+                  var ok = amp >= 1.6f && amp <= 38f
+
+                  if (steps.isNotEmpty() && t - steps.last() > 2500) steps.clear()
+                  if (ok && steps.isNotEmpty()) {
+                      val dt = t - steps.last()
+                      if (dt < 230) {
+                          ok = false
+                      } else if (steps.size >= 5) {
+                          val iv = (steps.toList().takeLast(6) + t).zipWithNext { a, b -> (b - a).toFloat() }
+                          val mean = iv.average().toFloat()
+                          val sd = sqrt(iv.map { (it - mean) * (it - mean) }.average()).toFloat()
+                          if (sd > mean * 0.55f) ok = false
+                      }
+                  }
+
+                  if (!ok) {
+                      onFake()
+                      return
+                  }
+
+                  steps.addLast(t)
+                  while (steps.size > 12) steps.removeFirst()
+                  lastRealAt = SystemClock.elapsedRealtime()
+
+                  var run = false
+                  if (steps.size >= 4) {
+                      val last = steps.toList().takeLast(6)
+                      val mean = (last.last() - last.first()).toFloat() / (last.size - 1)
+                      val cad = 1000f / max(mean, 1f)
+                      Live.cadence = (cad * 60).roundToInt()
+                      run = cad >= 2.5f || (cad >= 2.2f && amp > 20f)
+                  }
+                  onReal(run)
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/stride/app/TrackingService.kt <<'EOF'
+          package com.stride.app
+
+          import android.annotation.SuppressLint
+          import android.app.Notification
+          import android.app.NotificationChannel
+          import android.app.NotificationManager
+          import android.app.PendingIntent
+          import android.app.Service
           import android.content.Intent
           import android.content.pm.ServiceInfo
-          import android.graphics.Bitmap
-          import android.graphics.PixelFormat
-          import android.hardware.display.DisplayManager
-          import android.hardware.display.VirtualDisplay
-          import android.media.ImageReader
-          import android.media.projection.MediaProjection
-          import android.media.projection.MediaProjectionManager
-          import android.os.*
-          import android.util.DisplayMetrics
-          import android.view.WindowManager
-          import java.io.ByteArrayOutputStream
+          import android.hardware.Sensor
+          import android.hardware.SensorEvent
+          import android.hardware.SensorEventListener
+          import android.hardware.SensorManager
+          import android.location.Location
+          import android.location.LocationListener
+          import android.location.LocationManager
+          import android.os.Build
+          import android.os.Bundle
+          import android.os.Handler
+          import android.os.IBinder
+          import android.os.Looper
+          import android.os.SystemClock
 
-          @Suppress("DEPRECATION")
-          class MirrorService : Service() {
-              private var mp: MediaProjection? = null
-              private var vd: VirtualDisplay? = null
-              private var ir: ImageReader? = null
-              private var ht: HandlerThread? = null
-              private var server: WebServer? = null
+          /**
+           * Optionale "Live-Erkennung": Foreground-Service (mit Benachrichtigung).
+           * - GPS laeuft NUR waehrend aktivem Gehen/Laufen. Punkte ohne Aktivitaet werden verworfen.
+           * - Alles aelter als 60 Minuten wird geloescht.
+           */
+          class TrackingService : Service(), SensorEventListener, LocationListener {
+
+              private lateinit var sm: SensorManager
+              private lateinit var lm: LocationManager
+              private lateinit var det: Detector
+              private val handler = Handler(Looper.getMainLooper())
+              private var seg = 1
+              private var wasActive = false
+              private var gpsOn = false
+              private var idleSince = 0L
 
               override fun onBind(i: Intent?): IBinder? = null
 
-              override fun onStartCommand(i: Intent?, fl: Int, id: Int): Int {
-                  getSystemService(NotificationManager::class.java)
-                      .createNotificationChannel(NotificationChannel("pl", "PhoneLink", NotificationManager.IMPORTANCE_LOW))
-                  val n = Notification.Builder(this, "pl").setContentTitle("PhoneLink läuft")
-                      .setContentText("Dein Handy ist im WLAN erreichbar").setSmallIcon(android.R.drawable.ic_menu_share).build()
-                  startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
-                  val data = i?.getParcelableExtra<Intent>("data")
-                  if (data == null) { stopSelf(); return START_NOT_STICKY }
-                  mp = (getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager)
-                      .getMediaProjection(i.getIntExtra("code", 0), data)
-                  mp!!.registerCallback(object : MediaProjection.Callback() { override fun onStop() { stopSelf() } }, Handler(Looper.getMainLooper()))
-                  val dm = DisplayMetrics()
-                  (getSystemService(WINDOW_SERVICE) as WindowManager).defaultDisplay.getRealMetrics(dm)
-                  Shared.w = dm.widthPixels; Shared.h = dm.heightPixels
-                  val w = (minOf(800, dm.widthPixels) / 2) * 2
-                  val h = ((dm.heightPixels * w / dm.widthPixels) / 2) * 2
-                  ht = HandlerThread("pl").also { it.start() }
-                  ir = ImageReader.newInstance(w, h, PixelFormat.RGBA_8888, 3)
-                  vd = mp!!.createVirtualDisplay("pl", w, h, dm.densityDpi, DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, ir!!.surface, null, null)
-                  var last = 0L; var bmp: Bitmap? = null; val bo = ByteArrayOutputStream(150000)
-                  ir!!.setOnImageAvailableListener({ r ->
-                      val img = r.acquireLatestImage() ?: return@setOnImageAvailableListener
-                      try {
-                          val now = SystemClock.uptimeMillis()
-                          if (now - last >= 16) {
-                              last = now
-                              val p = img.planes[0]
-                              val bw = p.rowStride / p.pixelStride; if (bmp == null || bmp!!.width != bw) bmp = Bitmap.createBitmap(bw, img.height, Bitmap.Config.ARGB_8888); val b = bmp!!
-                              b.copyPixelsFromBuffer(p.buffer)
-                              bo.reset()
-                              (if (bw != img.width) Bitmap.createBitmap(b, 0, 0, img.width, img.height) else b).compress(Bitmap.CompressFormat.JPEG, 70, bo)
-                              
-                              Shared.frame = bo.toByteArray(); Shared.seq++
+              override fun onCreate() {
+                  super.onCreate()
+                  sm = getSystemService(SENSOR_SERVICE) as SensorManager
+                  lm = getSystemService(LOCATION_SERVICE) as LocationManager
+                  det = Detector(
+                      onReal = { run ->
+                          if (run) Store.addRun(this)
+                          Live.mode = if (run) "run" else "walk"
+                      },
+                      onFake = {
+                          Store.addFake(this)
+                          Live.fakeFlash = System.currentTimeMillis()
+                      }
+                  )
+                  seg = (System.currentTimeMillis() / 1000L).toInt()
+                  startForegroundCompat()
+                  sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)?.let { sm.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME) }
+                  sm.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)?.let { sm.registerListener(this, it, SensorManager.SENSOR_DELAY_FASTEST) }
+                  sm.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)?.let { sm.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL) }
+                  Live.running = true
+                  Live.mode = "idle"
+                  handler.post(tick)
+              }
+
+              override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+
+              private fun isActive(): Boolean {
+                  val now = SystemClock.elapsedRealtime()
+                  return det.lastRealAt > 0 && now - det.lastRealAt < 4000
+              }
+
+              private val tick = object : Runnable {
+                  override fun run() {
+                      val now = SystemClock.elapsedRealtime()
+                      if (isActive()) {
+                          if (!wasActive) {
+                              seg++
+                              wasActive = true
                           }
-                      } finally { img.close() }
-                  }, Handler(ht!!.looper))
-                  Shared.running = true
-                  server = WebServer(this).also { it.start() }
-                  return START_NOT_STICKY
+                          idleSince = 0L
+                          if (!gpsOn) startGps()
+                      } else {
+                          if (wasActive) {
+                              wasActive = false
+                              Live.mode = "idle"
+                              Live.cadence = 0
+                              Route.dropShortSegment(this@TrackingService, seg)
+                              idleSince = now
+                          }
+                          if (gpsOn && idleSince > 0 && now - idleSince > 20000L) stopGps()
+                      }
+                      handler.postDelayed(this, 1000L)
+                  }
+              }
+
+              override fun onSensorChanged(e: SensorEvent) {
+                  val t = e.timestamp / 1_000_000L
+                  when (e.sensor.type) {
+                      Sensor.TYPE_ACCELEROMETER -> det.onAccel(t, e.values[0], e.values[1], e.values[2])
+                      Sensor.TYPE_STEP_DETECTOR -> det.onStep(t)
+                      Sensor.TYPE_STEP_COUNTER -> Store.sync(this, e.values[0])
+                  }
+              }
+
+              override fun onAccuracyChanged(s: Sensor?, a: Int) {}
+
+              @SuppressLint("MissingPermission")
+              private fun startGps() {
+                  try {
+                      lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 2000L, 2f, this)
+                      gpsOn = true
+                      Live.gps = true
+                  } catch (e: Exception) {
+                  }
+              }
+
+              private fun stopGps() {
+                  try {
+                      lm.removeUpdates(this)
+                  } catch (e: Exception) {
+                  }
+                  gpsOn = false
+                  Live.gps = false
+              }
+
+              override fun onLocationChanged(l: Location) {
+                  if (!isActive() || l.accuracy > 35f) return // kein aktives Laufen => Punkt wird verworfen
+                  Route.add(this, Pt(l.latitude, l.longitude, System.currentTimeMillis(), seg, Live.mode == "run"))
+              }
+
+              @Deprecated("Deprecated in Java")
+              override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
+              override fun onProviderEnabled(provider: String) {}
+              override fun onProviderDisabled(provider: String) {}
+
+              private fun startForegroundCompat() {
+                  val ch = "stride_live"
+                  val nm = getSystemService(NotificationManager::class.java)
+                  nm.createNotificationChannel(NotificationChannel(ch, "Live-Erkennung", NotificationManager.IMPORTANCE_LOW))
+                  val pi = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
+                  val n = Notification.Builder(this, ch)
+                      .setSmallIcon(R.drawable.ic_stat)
+                      .setContentTitle("Stride Live-Erkennung")
+                      .setContentText("Erkennt Gehen, Laufen und Fake-Schritte")
+                      .setContentIntent(pi)
+                      .setOngoing(true)
+                      .build()
+                  if (Build.VERSION.SDK_INT >= 29) {
+                      startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+                  } else {
+                      startForeground(1, n)
+                  }
               }
 
               override fun onDestroy() {
-                  Shared.running = false; Shared.frame = null
-                  vd?.release(); ir?.close(); mp?.stop(); server?.stop(); ht?.quit()
+                  handler.removeCallbacksAndMessages(null)
+                  sm.unregisterListener(this)
+                  stopGps()
+                  Route.dropShortSegment(this, seg)
+                  Live.running = false
+                  Live.mode = "idle"
+                  Live.cadence = 0
                   super.onDestroy()
               }
           }
           EOF
-          cat > app/src/main/java/com/phonelink/MainActivity.kt <<'EOF'
-          package com.phonelink
 
-          import android.app.Activity
+      # ------------------------------------------------------------------
+      - name: Kotlin - Oberflaeche (Apple-Glas-Design)
+        run: |
+          cat > app/src/main/java/com/stride/app/MainActivity.kt <<'EOF'
+          package com.stride.app
+
+          import android.Manifest
+          import android.content.Context
           import android.content.Intent
-          import android.graphics.Color
-          import android.graphics.Typeface
-          import android.graphics.drawable.GradientDrawable
-          import android.media.projection.MediaProjectionManager
+          import android.content.pm.PackageManager
+          import android.hardware.Sensor
+          import android.hardware.SensorEvent
+          import android.hardware.SensorEventListener
+          import android.hardware.SensorManager
+          import android.net.Uri
           import android.os.Build
           import android.os.Bundle
-          import android.provider.Settings
-          import android.widget.*
-          import java.net.Inet4Address
-          import java.net.NetworkInterface
+          import androidx.activity.ComponentActivity
+          import androidx.activity.SystemBarStyle
+          import androidx.activity.compose.rememberLauncherForActivityResult
+          import androidx.activity.compose.setContent
+          import androidx.activity.enableEdgeToEdge
+          import androidx.activity.result.contract.ActivityResultContracts
+          import androidx.compose.animation.AnimatedContent
+          import androidx.compose.animation.AnimatedVisibility
+          import androidx.compose.animation.animateColorAsState
+          import androidx.compose.animation.core.Animatable
+          import androidx.compose.animation.core.FastOutSlowInEasing
+          import androidx.compose.animation.core.LinearEasing
+          import androidx.compose.animation.core.RepeatMode
+          import androidx.compose.animation.core.animateFloat
+          import androidx.compose.animation.core.animateFloatAsState
+          import androidx.compose.animation.core.animateIntAsState
+          import androidx.compose.animation.core.infiniteRepeatable
+          import androidx.compose.animation.core.rememberInfiniteTransition
+          import androidx.compose.animation.core.spring
+          import androidx.compose.animation.core.tween
+          import androidx.compose.animation.fadeIn
+          import androidx.compose.animation.fadeOut
+          import androidx.compose.animation.slideInHorizontally
+          import androidx.compose.animation.slideInVertically
+          import androidx.compose.animation.slideOutHorizontally
+          import androidx.compose.animation.togetherWith
+          import androidx.compose.foundation.Canvas
+          import androidx.compose.foundation.background
+          import androidx.compose.foundation.border
+          import androidx.compose.foundation.clickable
+          import androidx.compose.foundation.interaction.MutableInteractionSource
+          import androidx.compose.foundation.interaction.collectIsPressedAsState
+          import androidx.compose.foundation.layout.Arrangement
+          import androidx.compose.foundation.layout.Box
+          import androidx.compose.foundation.layout.Column
+          import androidx.compose.foundation.layout.ColumnScope
+          import androidx.compose.foundation.layout.Row
+          import androidx.compose.foundation.layout.Spacer
+          import androidx.compose.foundation.layout.fillMaxHeight
+          import androidx.compose.foundation.layout.fillMaxSize
+          import androidx.compose.foundation.layout.fillMaxWidth
+          import androidx.compose.foundation.layout.height
+          import androidx.compose.foundation.layout.navigationBarsPadding
+          import androidx.compose.foundation.layout.padding
+          import androidx.compose.foundation.layout.size
+          import androidx.compose.foundation.layout.statusBarsPadding
+          import androidx.compose.foundation.layout.width
+          import androidx.compose.foundation.rememberScrollState
+          import androidx.compose.foundation.shape.CircleShape
+          import androidx.compose.foundation.shape.RoundedCornerShape
+          import androidx.compose.foundation.verticalScroll
+          import androidx.compose.material.icons.Icons
+          import androidx.compose.material.icons.rounded.BarChart
+          import androidx.compose.material.icons.rounded.Home
+          import androidx.compose.material.icons.rounded.Place
+          import androidx.compose.material.icons.rounded.Settings
+          import androidx.compose.material3.Icon
+          import androidx.compose.material3.MaterialTheme
+          import androidx.compose.material3.Surface
+          import androidx.compose.material3.Switch
+          import androidx.compose.material3.SwitchDefaults
+          import androidx.compose.material3.Text
+          import androidx.compose.material3.darkColorScheme
+          import androidx.compose.runtime.Composable
+          import androidx.compose.runtime.DisposableEffect
+          import androidx.compose.runtime.LaunchedEffect
+          import androidx.compose.runtime.getValue
+          import androidx.compose.runtime.mutableIntStateOf
+          import androidx.compose.runtime.mutableStateOf
+          import androidx.compose.runtime.remember
+          import androidx.compose.runtime.setValue
+          import androidx.compose.ui.Alignment
+          import androidx.compose.ui.Modifier
+          import androidx.compose.ui.draw.clip
+          import androidx.compose.ui.draw.scale
+          import androidx.compose.ui.geometry.Offset
+          import androidx.compose.ui.geometry.Size
+          import androidx.compose.ui.graphics.Brush
+          import androidx.compose.ui.graphics.Color
+          import androidx.compose.ui.graphics.StrokeCap
+          import androidx.compose.ui.graphics.drawscope.Stroke
+          import androidx.compose.ui.graphics.drawscope.rotate
+          import androidx.compose.ui.graphics.lerp
+          import androidx.compose.ui.platform.LocalContext
+          import androidx.compose.ui.text.font.FontWeight
+          import androidx.compose.ui.text.style.TextAlign
+          import androidx.compose.ui.unit.Dp
+          import androidx.compose.ui.unit.dp
+          import androidx.compose.ui.unit.sp
+          import androidx.core.content.ContextCompat
+          import kotlinx.coroutines.Dispatchers
+          import kotlinx.coroutines.delay
+          import kotlinx.coroutines.withContext
+          import java.time.LocalDate
+          import java.time.format.DateTimeFormatter
+          import java.time.format.TextStyle as JTextStyle
+          import java.util.Locale
+          import kotlin.math.PI
+          import kotlin.math.cos
+          import kotlin.math.max
+          import kotlin.math.min
+          import kotlin.math.sin
 
-          @Suppress("DEPRECATION")
-          class MainActivity : Activity() {
-              private lateinit var url: TextView
-              private lateinit var b1: Button
-              private lateinit var b2: Button
-              private val gray = 0xFF86A0AE.toInt()
-              private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
-              private fun bg(c: Int, r: Int) = GradientDrawable().apply { setColor(c); cornerRadius = dp(r).toFloat() }
-              private fun tv(t: String, sp: Float, c: Int, bold: Boolean = false) = TextView(this).apply {
-                  text = t; textSize = sp; setTextColor(c); if (bold) typeface = Typeface.DEFAULT_BOLD
+          // ---------------------------------------------------------------- Farben
+          val Ink = Color(0xFF080A12)
+          val Mint = Color(0xFF30D158)
+          val Sky = Color(0xFF64D2FF)
+          val Azure = Color(0xFF0A84FF)
+          val Grape = Color(0xFFBF5AF2)
+          val Amber = Color(0xFFFF9F0A)
+          val Rose = Color(0xFFFF375F)
+
+          fun Int.fmt(): String = String.format(Locale.GERMAN, "%,d", this)
+          fun Double.f1(): String = String.format(Locale.GERMAN, "%.1f", this)
+          fun Double.f2(): String = String.format(Locale.GERMAN, "%.2f", this)
+
+          // ---------------------------------------------------------------- Activity
+          class MainActivity : ComponentActivity() {
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  enableEdgeToEdge(
+                      statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+                      navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+                  )
+                  Scheduler.schedule(this)
+                  setContent { App() }
               }
-              private fun btn(c: Int, f: () -> Unit) = Button(this).apply {
-                  isAllCaps = false; textSize = 16f; setTextColor(Color.WHITE); background = bg(c, 18)
-                  setOnClickListener { f() }
-                  layoutParams = LinearLayout.LayoutParams(-1, dp(56)).apply { topMargin = dp(12) }
+          }
+
+          // ---------------------------------------------------------------- Berechtigungen
+          data class Perms(val act: Boolean, val loc: Boolean, val notif: Boolean)
+
+          fun permState(c: Context): Perms {
+              fun g(p: String) = ContextCompat.checkSelfPermission(c, p) == PackageManager.PERMISSION_GRANTED
+              return Perms(
+                  if (Build.VERSION.SDK_INT >= 29) g(Manifest.permission.ACTIVITY_RECOGNITION) else true,
+                  g(Manifest.permission.ACCESS_FINE_LOCATION),
+                  if (Build.VERSION.SDK_INT >= 33) g(Manifest.permission.POST_NOTIFICATIONS) else true
+              )
+          }
+
+          fun needed(): Array<String> {
+              val l = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+              if (Build.VERSION.SDK_INT >= 29) l.add(Manifest.permission.ACTIVITY_RECOGNITION)
+              if (Build.VERSION.SDK_INT >= 33) l.add(Manifest.permission.POST_NOTIFICATIONS)
+              return l.toTypedArray()
+          }
+
+          // ---------------------------------------------------------------- Root
+          @Composable
+          fun App() {
+              val ctx = LocalContext.current
+              var tab by remember { mutableIntStateOf(0) }
+              var d by remember { mutableStateOf(Store.today(ctx)) }
+              var route by remember { mutableStateOf(Route.load(ctx)) }
+              var goal by remember { mutableIntStateOf(Store.goal(ctx)) }
+              var perms by remember { mutableStateOf(permState(ctx)) }
+
+              val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+                  perms = permState(ctx)
               }
 
-              override fun onCreate(s: Bundle?) {
-                  super.onCreate(s)
-                  window.statusBarColor = 0xFF0D1B24.toInt(); window.navigationBarColor = 0xFF0D1B24.toInt()
-                  if (Build.VERSION.SDK_INT >= 33) requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 1)
-                  val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(22), dp(48), dp(22), dp(22)) }
-                  col.addView(tv("PhoneLink", 32f, Color.WHITE, true))
-                  col.addView(tv("Dein Handy im Browser deines iPads", 15f, gray))
-                  val card = LinearLayout(this).apply {
-                      orientation = LinearLayout.VERTICAL; background = bg(0xFF16293A.toInt(), 24)
-                      setPadding(dp(20), dp(18), dp(20), dp(18))
-                      layoutParams = LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(24) }
+              LaunchedEffect(Unit) {
+                  if (!perms.act) launcher.launch(needed())
+              }
+
+              // Tick: UI-Daten aktualisieren
+              LaunchedEffect(Unit) {
+                  var n = 0
+                  while (true) {
+                      d = Store.today(ctx)
+                      route = withContext(Dispatchers.IO) { Route.load(ctx) }
+                      goal = Store.goal(ctx)
+                      perms = permState(ctx)
+                      if (n++ % 20 == 0) StepWidget.updateAll(ctx)
+                      delay(1000)
                   }
-                  card.addView(tv("Öffne am iPad in Safari", 13f, gray))
-                  url = tv("", 15f, 0xFFFFB84D.toInt(), true).apply { typeface = Typeface.MONOSPACE }
-                  card.addView(url)
-                  card.addView(tv("PIN", 13f, gray).apply { setPadding(0, dp(14), 0, 0) })
-                  card.addView(tv(Shared.pin, 34f, 0xFF5CE1C6.toInt(), true).apply { letterSpacing = 0.2f })
-                  col.addView(card)
-                  b1 = btn(0xFF3B6EF5.toInt()) { toggle() }
-                  b2 = btn(0xFF22394D.toInt()) { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
-                  col.addView(b1); col.addView(b2)
-                  col.addView(tv("Für die Fernsteuerung: Einstellungen → Apps → PhoneLink → ⋮ → „Eingeschränkte Einstellungen zulassen“. Danach unter Bedienungshilfen → Installierte Apps → PhoneLink einschalten.", 13f, gray).apply { setPadding(0, dp(16), 0, 0) })
-                  col.addView(tv("Von überall: Installiere Tailscale (gratis) auf Handy und iPad und melde beide mit demselben Konto an. Dann erscheint hier die „Überall“-Adresse.", 13f, gray).apply { setPadding(0, dp(12), 0, 0) })
-                  setContentView(ScrollView(this).apply { setBackgroundColor(0xFF0D1B24.toInt()); addView(col) })
               }
 
-              private fun toggle() {
-                  if (Shared.running) { stopService(Intent(this, MirrorService::class.java)); b1.postDelayed({ refresh() }, 500) }
-                  else startActivityForResult((getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager).createScreenCaptureIntent(), 42)
-              }
-
-              override fun onActivityResult(rq: Int, rc: Int, d: Intent?) {
-                  if (rq == 42 && rc == RESULT_OK && d != null) {
-                      startForegroundService(Intent(this, MirrorService::class.java).putExtra("code", rc).putExtra("data", d))
-                      b1.postDelayed({ refresh() }, 700)
-                  }
-              }
-
-              override fun onResume() { super.onResume(); refresh() }
-
-              private fun refresh() {
-                  url.text = if (Shared.running) { val (lan, ts) = ips(); "WLAN: http://$lan:8080" + (if (ts != null) "\nÜberall: http://$ts:8080" else "") } else "Spiegelung ist aus"
-                  b1.text = if (Shared.running) "Spiegelung stoppen" else "Spiegelung starten"
-                  b2.text = if (ControlService.inst != null) "Fernsteuerung aktiv ✓" else "Fernsteuerung aktivieren"
-              }
-
-              private fun ips(): Pair<String, String?> {
-                  var lan = "kein WLAN"; var ts: String? = null
-                  try {
-                      for (n in NetworkInterface.getNetworkInterfaces()) for (a in n.inetAddresses) if (!a.isLoopbackAddress && a is Inet4Address) {
-                          val h = a.hostAddress ?: continue
-                          if (h.startsWith("100.") && (h.split(".")[1].toIntOrNull() ?: 0) in 64..127) ts = h else if (a.isSiteLocalAddress) lan = h
+              // Hardware-Zaehler live mitlesen, solange die App offen ist
+              DisposableEffect(perms.act) {
+                  val sm = ctx.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+                  val sensor = sm.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
+                  val l = object : SensorEventListener {
+                      override fun onSensorChanged(e: SensorEvent) {
+                          Store.sync(ctx, e.values[0])
+                          d = Store.today(ctx)
                       }
-                  } catch (e: Exception) {}
-                  return Pair(lan, ts)
+                      override fun onAccuracyChanged(x: Sensor?, a: Int) {}
+                  }
+                  if (sensor != null && perms.act) sm.registerListener(l, sensor, SensorManager.SENSOR_DELAY_UI)
+                  onDispose { sm.unregisterListener(l) }
               }
 
-              private fun ip(): String {
-                  try {
-                      for (n in NetworkInterface.getNetworkInterfaces()) for (a in n.inetAddresses)
-                          if (!a.isLoopbackAddress && a is Inet4Address && a.isSiteLocalAddress) return a.hostAddress ?: ""
-                  } catch (e: Exception) {}
-                  return "kein WLAN"
+              // Live-Service nach App-/Prozess-Neustart wiederherstellen
+              LaunchedEffect(perms.act, perms.loc) {
+                  if (Store.tracking(ctx) && perms.act && perms.loc && !Live.running) {
+                      try {
+                          ContextCompat.startForegroundService(ctx, Intent(ctx, TrackingService::class.java))
+                      } catch (e: Exception) {
+                      }
+                  }
+              }
+
+              val onToggle: (Boolean) -> Unit = { on ->
+                  if (on && !(perms.act && perms.loc)) {
+                      launcher.launch(needed())
+                  } else {
+                      Store.setTracking(ctx, on)
+                      val i = Intent(ctx, TrackingService::class.java)
+                      if (on) {
+                          try {
+                              ContextCompat.startForegroundService(ctx, i)
+                          } catch (e: Exception) {
+                          }
+                      } else {
+                          ctx.stopService(i)
+                      }
+                  }
+              }
+
+              val hist = remember(d) {
+                  (6 downTo 0).map { Store.day(ctx, LocalDate.now().minusDays(it.toLong()).toString()) }
+              }
+
+              MaterialTheme(colorScheme = darkColorScheme(primary = Sky, background = Ink, surface = Ink)) {
+                  Surface(Modifier.fillMaxSize(), color = Color.Transparent, contentColor = Color.White) {
+                      Box(Modifier.fillMaxSize()) {
+                          Aurora(Modifier.fillMaxSize())
+                          AnimatedContent(
+                              targetState = tab,
+                              modifier = Modifier.fillMaxSize(),
+                              transitionSpec = {
+                                  val dir = if (targetState > initialState) 1 else -1
+                                  (fadeIn(tween(380, delayMillis = 60)) +
+                                      slideInHorizontally(tween(420, easing = FastOutSlowInEasing)) { it / 7 * dir }) togetherWith
+                                      (fadeOut(tween(200)) +
+                                          slideOutHorizontally(tween(420, easing = FastOutSlowInEasing)) { -it / 7 * dir })
+                              },
+                              label = "tabs"
+                          ) { t ->
+                              when (t) {
+                                  0 -> Home(d, goal, route, Live.running, onToggle)
+                                  1 -> RouteScreen(route)
+                                  2 -> History(hist, goal)
+                                  else -> SettingsScreen(goal, perms,
+                                      onGoal = { Store.setGoal(ctx, it); goal = Store.goal(ctx) },
+                                      onAsk = { launcher.launch(needed()) })
+                              }
+                          }
+                          TabBar(tab, { tab = it }, Modifier.align(Alignment.BottomCenter).navigationBarsPadding())
+                      }
+                  }
+              }
+          }
+
+          // ---------------------------------------------------------------- Bausteine
+          @Composable
+          fun Aurora(modifier: Modifier = Modifier) {
+              val t = rememberInfiniteTransition(label = "aurora")
+              val p by t.animateFloat(
+                  0f, (2 * PI).toFloat(),
+                  infiniteRepeatable(tween(40000, easing = LinearEasing)), label = "p"
+              )
+              Canvas(modifier) {
+                  drawRect(Ink)
+                  val w = size.width
+                  val h = size.height
+                  fun blob(cx: Float, cy: Float, r: Float, c: Color) {
+                      drawCircle(
+                          brush = Brush.radialGradient(listOf(c.copy(alpha = .48f), Color.Transparent), center = Offset(cx, cy), radius = r),
+                          radius = r, center = Offset(cx, cy)
+                      )
+                  }
+                  blob(w * (.2f + .15f * sin(p)), h * (.14f + .08f * cos(p)), w * .95f, Azure)
+                  blob(w * (.85f + .10f * cos(p)), h * (.46f + .10f * sin(p)), w * .8f, Grape)
+                  blob(w * (.30f + .20f * sin(p + 2f)), h * (.88f + .06f * cos(p + 1f)), w * .95f, Mint.copy(alpha = .8f))
+              }
+          }
+
+          fun Modifier.glass(r: Dp = 28.dp, base: Color = Color.Transparent): Modifier {
+              val s = RoundedCornerShape(r)
+              return this
+                  .clip(s)
+                  .background(base)
+                  .background(Brush.verticalGradient(listOf(Color.White.copy(alpha = .16f), Color.White.copy(alpha = .05f))))
+                  .border(1.dp, Brush.verticalGradient(listOf(Color.White.copy(alpha = .38f), Color.White.copy(alpha = .06f))), s)
+          }
+
+          @Composable
+          fun Modifier.bounceClick(onClick: () -> Unit): Modifier {
+              val src = remember { MutableInteractionSource() }
+              val pressed by src.collectIsPressedAsState()
+              val s by animateFloatAsState(if (pressed) .93f else 1f, spring(dampingRatio = .5f, stiffness = 500f), label = "press")
+              return this.scale(s).clickable(interactionSource = src, indication = null, onClick = onClick)
+          }
+
+          @Composable
+          fun Txt(
+              t: String, size: Int, w: FontWeight = FontWeight.Normal, a: Float = 1f,
+              color: Color = Color.White, spacing: Float = 0f, modifier: Modifier = Modifier, align: TextAlign? = null
+          ) {
+              Text(
+                  t, modifier, color = color.copy(alpha = a), fontSize = size.sp, fontWeight = w,
+                  letterSpacing = spacing.sp, textAlign = align
+              )
+          }
+
+          @Composable
+          fun Appear(i: Int, content: @Composable () -> Unit) {
+              var show by remember { mutableStateOf(false) }
+              LaunchedEffect(Unit) {
+                  delay(i * 70L)
+                  show = true
+              }
+              AnimatedVisibility(
+                  visible = show,
+                  enter = fadeIn(tween(550)) + slideInVertically(tween(550, easing = FastOutSlowInEasing)) { it / 6 }
+              ) { content() }
+          }
+
+          @Composable
+          fun Screen(content: @Composable ColumnScope.() -> Unit) {
+              Column(
+                  Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState())
+                      .padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 120.dp),
+                  verticalArrangement = Arrangement.spacedBy(14.dp),
+                  content = content
+              )
+          }
+
+          @Composable
+          fun Title(t: String, s: String) {
+              Column(Modifier.padding(top = 8.dp, start = 4.dp)) {
+                  Txt(t, 36, FontWeight.Bold, spacing = -.8f)
+                  Txt(s, 15, FontWeight.Medium, .55f)
+              }
+          }
+
+          @Composable
+          fun Stat(title: String, value: String, unit: String, accent: Color, modifier: Modifier = Modifier) {
+              Column(modifier.glass(26.dp).padding(18.dp)) {
+                  Txt(title.uppercase(), 11, FontWeight.SemiBold, .55f, spacing = 1f)
+                  Spacer(Modifier.height(10.dp))
+                  Row(verticalAlignment = Alignment.Bottom) {
+                      Txt(value, 30, FontWeight.Bold, color = accent, spacing = -.5f)
+                      Spacer(Modifier.width(5.dp))
+                      Txt(unit, 13, FontWeight.Medium, .6f, modifier = Modifier.padding(bottom = 5.dp))
+                  }
+              }
+          }
+
+          @Composable
+          fun GlassButton(text: String, onClick: () -> Unit) {
+              Box(
+                  Modifier.fillMaxWidth().bounceClick(onClick).glass(20.dp).padding(14.dp),
+                  contentAlignment = Alignment.Center
+              ) { Txt(text, 15, FontWeight.SemiBold) }
+          }
+
+          // ---------------------------------------------------------------- Ringe
+          @Composable
+          fun Rings(outer: Float, inner: Float, modifier: Modifier = Modifier) {
+              val o by animateFloatAsState(outer.coerceIn(0f, 1f), spring(dampingRatio = .75f, stiffness = 30f), label = "o")
+              val i by animateFloatAsState(inner.coerceIn(0f, 1f), spring(dampingRatio = .75f, stiffness = 30f), label = "i")
+              Canvas(modifier) {
+                  val w = size.minDimension
+                  val st = w * 0.085f
+                  fun ring(inset: Float, p: Float, a: Color, b: Color) {
+                      val dia = w - inset * 2 - st
+                      val tl = Offset(inset + st / 2, inset + st / 2)
+                      drawArc(
+                          color = a.copy(alpha = .16f), startAngle = 0f, sweepAngle = 360f, useCenter = false,
+                          topLeft = tl, size = Size(dia, dia), style = Stroke(st, cap = StrokeCap.Round)
+                      )
+                      if (p > 0.003f) {
+                          val br = Brush.sweepGradient(0f to a, max(p, .02f) to b, 1f to b, center = center)
+                          rotate(-90f) {
+                              drawArc(
+                                  brush = br, startAngle = 0f, sweepAngle = 360f * min(p, 1f), useCenter = false,
+                                  topLeft = tl, size = Size(dia, dia), style = Stroke(st, cap = StrokeCap.Round)
+                              )
+                          }
+                      }
+                  }
+                  ring(0f, o, Mint, Sky)
+                  ring(st * 1.35f, i, Rose, Amber)
+              }
+          }
+
+          @Composable
+          fun RingCard(d: Day, goal: Int) {
+              val shown by animateIntAsState(d.real, tween(1100, easing = FastOutSlowInEasing), label = "steps")
+              Column(Modifier.fillMaxWidth().glass(36.dp).padding(vertical = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                  Box(contentAlignment = Alignment.Center) {
+                      Rings(d.real.toFloat() / goal, d.run / 2000f, Modifier.size(250.dp))
+                      Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                          Txt("SCHRITTE", 12, FontWeight.SemiBold, .55f, spacing = 1.5f)
+                          Txt(shown.fmt(), 50, FontWeight.Bold, spacing = -1f)
+                          Txt("von ${goal.fmt()}", 14, FontWeight.Medium, .6f)
+                      }
+                  }
+                  Spacer(Modifier.height(16.dp))
+                  Row(horizontalArrangement = Arrangement.spacedBy(22.dp)) {
+                      Row(verticalAlignment = Alignment.CenterVertically) {
+                          Box(Modifier.size(8.dp).background(Mint, CircleShape))
+                          Spacer(Modifier.width(7.dp))
+                          Txt("Tagesziel", 12, FontWeight.Medium, .7f)
+                      }
+                      Row(verticalAlignment = Alignment.CenterVertically) {
+                          Box(Modifier.size(8.dp).background(Rose, CircleShape))
+                          Spacer(Modifier.width(7.dp))
+                          Txt("Laufen (Ziel 2.000)", 12, FontWeight.Medium, .7f)
+                      }
+                  }
+              }
+          }
+
+          @Composable
+          fun LivePill() {
+              val mode = if (Live.running) Live.mode else "off"
+              val flash = System.currentTimeMillis() - Live.fakeFlash < 2500
+              val col by animateColorAsState(
+                  when {
+                      flash -> Rose
+                      mode == "run" -> Amber
+                      mode == "walk" -> Mint
+                      mode == "idle" -> Sky
+                      else -> Color.Gray
+                  }, tween(400), label = "dot"
+              )
+              val inf = rememberInfiniteTransition(label = "pulse")
+              val pulse by inf.animateFloat(
+                  .6f, 1.25f,
+                  infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "pulse"
+              )
+              val text = when {
+                  flash -> "Fake-Schritt erkannt"
+                  mode == "run" -> "Laufen · ${Live.cadence} Schritte/min"
+                  mode == "walk" -> "Gehen · ${Live.cadence} Schritte/min"
+                  mode == "idle" -> "Bereit – wartet auf Bewegung"
+                  else -> "Live-Erkennung aus"
+              }
+              Row(
+                  Modifier.fillMaxWidth().glass(24.dp).padding(horizontal = 18.dp, vertical = 14.dp),
+                  verticalAlignment = Alignment.CenterVertically
+              ) {
+                  Box(Modifier.size(10.dp).scale(if (mode == "off") 1f else pulse).background(col, CircleShape))
+                  Spacer(Modifier.width(12.dp))
+                  Txt(text, 15, FontWeight.Medium)
+              }
+          }
+
+          @Composable
+          fun SplitCard(d: Day) {
+              val tot = max(1, d.real)
+              val rf by animateFloatAsState(d.run.toFloat() / tot, tween(900, easing = FastOutSlowInEasing), label = "rf")
+              Column(Modifier.fillMaxWidth().glass(26.dp).padding(18.dp)) {
+                  Txt("GEHEN & LAUFEN", 11, FontWeight.SemiBold, .55f, spacing = 1f)
+                  Spacer(Modifier.height(12.dp))
+                  Row(Modifier.fillMaxWidth().height(14.dp).clip(CircleShape).background(Color.White.copy(alpha = .08f))) {
+                      Box(Modifier.weight(max(.0001f, 1f - rf)).fillMaxHeight().background(Mint))
+                      Box(Modifier.weight(max(.0001f, rf)).fillMaxHeight().background(Amber))
+                  }
+                  Spacer(Modifier.height(12.dp))
+                  Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                      Txt("Gehen  ${d.walk.fmt()}", 14, FontWeight.Medium, color = Mint)
+                      Txt("Laufen  ${d.run.fmt()}", 14, FontWeight.Medium, color = Amber)
+                  }
+              }
+          }
+
+          @Composable
+          fun LiveCard(on: Boolean, onToggle: (Boolean) -> Unit) {
+              Row(Modifier.fillMaxWidth().glass(26.dp).padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+                  Column(Modifier.weight(1f)) {
+                      Txt("Live-Erkennung", 17, FontWeight.SemiBold)
+                      Spacer(Modifier.height(4.dp))
+                      Txt(
+                          "Erkennt Gehen/Laufen, filtert Fake-Schritte und zeichnet die Route der letzten Stunde auf. " +
+                              "Das reine Zählen funktioniert immer – auch ohne.",
+                          13, FontWeight.Normal, .6f
+                      )
+                  }
+                  Spacer(Modifier.width(12.dp))
+                  Switch(
+                      checked = on, onCheckedChange = onToggle,
+                      colors = SwitchDefaults.colors(
+                          checkedTrackColor = Mint, checkedThumbColor = Color.White, checkedBorderColor = Color.Transparent,
+                          uncheckedTrackColor = Color.White.copy(alpha = .15f), uncheckedThumbColor = Color.White,
+                          uncheckedBorderColor = Color.Transparent
+                      )
+                  )
+              }
+          }
+
+          // ---------------------------------------------------------------- Screens
+          @Composable
+          fun Home(d: Day, goal: Int, route: List<Pt>, live: Boolean, onToggle: (Boolean) -> Unit) {
+              val rs = remember(route) { Route.stats(route) }
+              val pct = if (d.total > 0) d.real * 100 / d.total else 100
+              Screen {
+                  Appear(0) { Title("Heute", LocalDate.now().format(DateTimeFormatter.ofPattern("EEEE, d. MMMM", Locale.GERMAN))) }
+                  Appear(1) { RingCard(d, goal) }
+                  Appear(2) { LivePill() }
+                  Appear(3) {
+                      Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                          Stat("Distanz", d.km.f2(), "km", Mint, Modifier.weight(1f))
+                          Stat("Kalorien", "${d.kcal}", "kcal", Rose, Modifier.weight(1f))
+                      }
+                  }
+                  Appear(4) {
+                      Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                          Stat("Ø Tempo · 60 Min", if (rs.timeS > 0) rs.avgKmh.f1() else "–", "km/h", Sky, Modifier.weight(1f))
+                          Stat("Echtheit", "$pct", "%", Grape, Modifier.weight(1f))
+                      }
+                  }
+                  Appear(5) {
+                      Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                          Stat("Echt", d.real.fmt(), "Schritte", Mint, Modifier.weight(1f))
+                          Stat("Fake", d.fake.fmt(), "erkannt", Rose, Modifier.weight(1f))
+                      }
+                  }
+                  Appear(6) { SplitCard(d) }
+                  Appear(7) { LiveCard(live, onToggle) }
+              }
+          }
+
+          @Composable
+          fun RouteCanvas(pts: List<Pt>, prog: Float, modifier: Modifier) {
+              Canvas(modifier) {
+                  if (pts.size < 2) return@Canvas
+                  val lat0 = pts.map { it.lat }.average()
+                  val kx = cos(Math.toRadians(lat0))
+                  val xs = pts.map { it.lon * kx }
+                  val ys = pts.map { -it.lat }
+                  val minX = xs.min()
+                  val maxX = xs.max()
+                  val minY = ys.min()
+                  val maxY = ys.max()
+                  val pad = 28.dp.toPx()
+                  val sx = max(maxX - minX, 1e-7)
+                  val sy = max(maxY - minY, 1e-7)
+                  val scale = min((size.width - 2 * pad) / sx, (size.height - 2 * pad) / sy)
+                  val ox = (size.width - sx * scale) / 2
+                  val oy = (size.height - sy * scale) / 2
+                  fun pos(i: Int) = Offset((ox + (xs[i] - minX) * scale).toFloat(), (oy + (ys[i] - minY) * scale).toFloat())
+                  val now = System.currentTimeMillis()
+                  val n = ((pts.size - 1) * prog).toInt()
+                  for (i in 1..n) {
+                      if (pts[i].seg != pts[i - 1].seg) continue
+                      val age = ((now - pts[i].t) / 3_600_000f).coerceIn(0f, 1f)
+                      val col = if (pts[i].run) Amber else Sky
+                      drawLine(col.copy(alpha = 1f - .65f * age), pos(i - 1), pos(i), strokeWidth = 5.dp.toPx(), cap = StrokeCap.Round)
+                  }
+                  drawCircle(Sky.copy(alpha = .35f), 15.dp.toPx(), pos(n))
+                  drawCircle(Color.White, 6.dp.toPx(), pos(n))
+              }
+          }
+
+          @Composable
+          fun RouteScreen(route: List<Pt>) {
+              val prog = remember { Animatable(0f) }
+              LaunchedEffect(Unit) { prog.animateTo(1f, tween(1500, easing = FastOutSlowInEasing)) }
+              val rs = remember(route) { Route.stats(route) }
+              val mm = (rs.timeS / 60).toInt()
+              val ss = (rs.timeS % 60).toInt()
+              Screen {
+                  Appear(0) { Title("Route", "Letzte 60 Minuten · nur aktives Gehen & Laufen") }
+                  Appear(1) {
+                      Box(Modifier.fillMaxWidth().height(380.dp).glass(36.dp), contentAlignment = Alignment.Center) {
+                          if (route.size < 2) {
+                              Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(28.dp)) {
+                                  Txt("Noch keine Route", 20, FontWeight.SemiBold)
+                                  Spacer(Modifier.height(8.dp))
+                                  Txt(
+                                      "Aktiviere die Live-Erkennung und geh los. Pausen und Punkte ohne aktives Laufen werden automatisch gelöscht.",
+                                      14, FontWeight.Normal, .6f, align = TextAlign.Center
+                                  )
+                              }
+                          } else {
+                              RouteCanvas(route, prog.value, Modifier.fillMaxSize())
+                          }
+                      }
+                  }
+                  Appear(2) {
+                      Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                          Stat("Ø Tempo", if (rs.timeS > 0) rs.avgKmh.f1() else "–", "km/h", Sky, Modifier.weight(1f))
+                          Stat("Distanz", (rs.distM / 1000).f2(), "km", Mint, Modifier.weight(1f))
+                      }
+                  }
+                  Appear(3) {
+                      Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                          Stat("Aktiv", String.format(Locale.GERMAN, "%d:%02d", mm, ss), "min", Amber, Modifier.weight(1f))
+                          Stat("Punkte", "${route.size}", "GPS", Grape, Modifier.weight(1f))
+                      }
+                  }
+                  Appear(4) {
+                      Txt(
+                          "Cyan = Gehen, Orange = Laufen. Ältere Teile verblassen und werden nach 60 Minuten gelöscht.",
+                          12, FontWeight.Normal, .45f, modifier = Modifier.padding(horizontal = 6.dp)
+                      )
+                  }
+              }
+          }
+
+          @Composable
+          fun History(days: List<Day>, goal: Int) {
+              var go by remember { mutableStateOf(false) }
+              LaunchedEffect(Unit) { go = true }
+              val mx = max(goal, days.maxOf { it.real }).toFloat()
+              val avg = days.sumOf { it.real } / max(1, days.size)
+              val best = days.maxOf { it.real }
+              Screen {
+                  Appear(0) { Title("Verlauf", "Die letzten 7 Tage · nur echte Schritte") }
+                  Appear(1) {
+                      Row(
+                          Modifier.fillMaxWidth().height(290.dp).glass(32.dp).padding(horizontal = 14.dp, vertical = 18.dp),
+                          horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Bottom
+                      ) {
+                          days.forEachIndexed { i, x ->
+                              val target = if (go) x.real / mx else 0f
+                              val f by animateFloatAsState(
+                                  target, tween(900, delayMillis = i * 80, easing = FastOutSlowInEasing), label = "bar"
+                              )
+                              val reached = x.real >= goal
+                              Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Bottom) {
+                                  Txt(if (x.real >= 1000) (x.real / 1000.0).f1() + "k" else "${x.real}", 11, FontWeight.SemiBold, .75f)
+                                  Spacer(Modifier.height(6.dp))
+                                  Box(
+                                      Modifier.fillMaxWidth(.78f).height((170f * f).dp)
+                                          .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp, bottomStart = 4.dp, bottomEnd = 4.dp))
+                                          .background(
+                                              Brush.verticalGradient(
+                                                  if (reached) listOf(Sky, Mint) else listOf(Azure, Grape)
+                                              )
+                                          )
+                                  )
+                                  Spacer(Modifier.height(8.dp))
+                                  Txt(
+                                      LocalDate.parse(x.date).dayOfWeek.getDisplayName(JTextStyle.SHORT, Locale.GERMAN),
+                                      12, if (i == days.lastIndex) FontWeight.Bold else FontWeight.Medium,
+                                      if (i == days.lastIndex) 1f else .55f
+                                  )
+                              }
+                          }
+                      }
+                  }
+                  Appear(2) {
+                      Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                          Stat("Ø pro Tag", avg.fmt(), "Schritte", Sky, Modifier.weight(1f))
+                          Stat("Bester Tag", best.fmt(), "Schritte", Mint, Modifier.weight(1f))
+                      }
+                  }
+                  Appear(3) {
+                      Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                          Stat("Gesamt km", days.sumOf { it.km }.f1(), "km", Amber, Modifier.weight(1f))
+                          Stat("Fake gesamt", days.sumOf { it.fake }.fmt(), "erkannt", Rose, Modifier.weight(1f))
+                      }
+                  }
+              }
+          }
+
+          @Composable
+          fun PermRow(label: String, ok: Boolean) {
+              Row(Modifier.fillMaxWidth().padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+                  Box(Modifier.size(9.dp).background(if (ok) Mint else Rose, CircleShape))
+                  Spacer(Modifier.width(12.dp))
+                  Txt(label, 15, FontWeight.Medium, modifier = Modifier.weight(1f))
+                  Txt(if (ok) "Aktiv" else "Aus", 13, FontWeight.Medium, .6f)
+              }
+          }
+
+          @Composable
+          fun SettingsScreen(goal: Int, perms: Perms, onGoal: (Int) -> Unit, onAsk: () -> Unit) {
+              val ctx = LocalContext.current
+              Screen {
+                  Appear(0) { Title("Mehr", "Ziel, Berechtigungen & Akku") }
+                  Appear(1) {
+                      Row(Modifier.fillMaxWidth().glass(28.dp).padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+                          Column(Modifier.weight(1f)) {
+                              Txt("TAGESZIEL", 11, FontWeight.SemiBold, .55f, spacing = 1f)
+                              Txt(goal.fmt(), 28, FontWeight.Bold, spacing = -.5f)
+                          }
+                          Box(
+                              Modifier.size(46.dp).bounceClick { onGoal(goal - 500) }.glass(23.dp),
+                              contentAlignment = Alignment.Center
+                          ) { Txt("−", 24, FontWeight.Medium) }
+                          Spacer(Modifier.width(10.dp))
+                          Box(
+                              Modifier.size(46.dp).bounceClick { onGoal(goal + 500) }.glass(23.dp),
+                              contentAlignment = Alignment.Center
+                          ) { Txt("+", 24, FontWeight.Medium) }
+                      }
+                  }
+                  Appear(2) {
+                      Column(Modifier.fillMaxWidth().glass(28.dp).padding(18.dp)) {
+                          Txt("BERECHTIGUNGEN", 11, FontWeight.SemiBold, .55f, spacing = 1f)
+                          Spacer(Modifier.height(6.dp))
+                          PermRow("Aktivitätserkennung (Schritte)", perms.act)
+                          PermRow("Standort (Route)", perms.loc)
+                          PermRow("Benachrichtigungen", perms.notif)
+                      }
+                  }
+                  Appear(3) { GlassButton("Berechtigungen anfragen") { onAsk() } }
+                  Appear(4) {
+                      GlassButton("App-Einstellungen öffnen") {
+                          try {
+                              ctx.startActivity(
+                                  Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}"))
+                                      .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                              )
+                          } catch (e: Exception) {
+                          }
+                      }
+                  }
+                  Appear(5) {
+                      GlassButton("Akku-Optimierung anpassen") {
+                          try {
+                              ctx.startActivity(
+                                  Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                                      .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                              )
+                          } catch (e: Exception) {
+                          }
+                      }
+                  }
+                  Appear(6) { GlassButton("Route jetzt löschen") { Route.clear(ctx) } }
+                  Appear(7) {
+                      Txt(
+                          "Stride zählt über den Schrittzähler-Chip deines Handys – dafür muss die App nicht laufen. " +
+                              "Das Widget aktualisiert sich automatisch ca. alle 15 Minuten und beim Öffnen der App.",
+                          12, FontWeight.Normal, .45f, modifier = Modifier.padding(horizontal = 6.dp)
+                      )
+                  }
+              }
+          }
+
+          // ---------------------------------------------------------------- Tab-Leiste (Glas)
+          @Composable
+          fun TabBar(sel: Int, onSel: (Int) -> Unit, modifier: Modifier = Modifier) {
+              val items = listOf(
+                  "Heute" to Icons.Rounded.Home,
+                  "Route" to Icons.Rounded.Place,
+                  "Verlauf" to Icons.Rounded.BarChart,
+                  "Mehr" to Icons.Rounded.Settings
+              )
+              Row(
+                  modifier.padding(horizontal = 24.dp, vertical = 12.dp).fillMaxWidth()
+                      .glass(34.dp, base = Color(0xCC0B0E17)).padding(6.dp),
+                  horizontalArrangement = Arrangement.SpaceBetween
+              ) {
+                  items.forEachIndexed { i, (label, icon) ->
+                      val a by animateFloatAsState(if (sel == i) 1f else 0f, tween(320, easing = FastOutSlowInEasing), label = "tab")
+                      Box(
+                          Modifier.weight(1f).bounceClick { onSel(i) }
+                              .clip(RoundedCornerShape(26.dp))
+                              .background(Color.White.copy(alpha = .14f * a))
+                              .padding(vertical = 9.dp),
+                          contentAlignment = Alignment.Center
+                      ) {
+                          Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                              Icon(
+                                  icon, contentDescription = label,
+                                  tint = lerp(Color.White.copy(alpha = .5f), Sky, a),
+                                  modifier = Modifier.size(24.dp).scale(1f + .12f * a)
+                              )
+                              Txt(label, 11, FontWeight.SemiBold, .5f + .5f * a)
+                          }
+                      }
+                  }
               }
           }
           EOF
-          cat > app/src/main/assets/index.html <<'EOF'
-          <!doctype html>
-          <html lang="de"><head><meta charset="utf-8">
-          <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
-          <meta name="apple-mobile-web-app-capable" content="yes">
-          <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-          <meta name="theme-color" content="#0D1B24">
-          <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 108 108'%3E%3Crect width='108' height='108' rx='28' fill='%231E3A8A'/%3E%3Cpath d='M66 47a9 9 0 0 1 0 13M72 42a17 17 0 0 1 0 24' stroke='%23FFB84D' stroke-width='5' fill='none' stroke-linecap='round'/%3E%3Crect x='31' y='33' width='24' height='42' rx='5' fill='none' stroke='white' stroke-width='4'/%3E%3C/svg%3E">
-          <title>PhoneLink</title>
-          <style>
-          :root{--bg:#0D1B24;--glass:rgba(255,255,255,.08);--line:rgba(255,255,255,.16);--ink:#EAF2F5;--mute:#9DB3BF;--amber:#FFB84D;--mint:#5CE1C6;--blue:#3B6EF5;--bad:#FF7A8A}
-          *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-          html,body{height:100%;margin:0;overflow:hidden;overscroll-behavior:none}
-          body{background:var(--bg);color:var(--ink);font:16px/1.4 ui-rounded,"SF Pro Rounded",-apple-system,system-ui,sans-serif;-webkit-user-select:none;user-select:none}
-          #pin,#txt{-webkit-user-select:text;user-select:text}
-          .aur{position:fixed;inset:-20%;z-index:-1;filter:blur(80px) saturate(150%);opacity:.85}
-          .aur i{position:absolute;border-radius:50%;animation:drift 20s ease-in-out infinite alternate}
-          .aur i:nth-child(1){width:55vmax;height:55vmax;left:0;top:0;background:var(--blue)}
-          .aur i:nth-child(2){width:45vmax;height:45vmax;right:0;bottom:0;background:var(--mint);animation-delay:-7s}
-          .aur i:nth-child(3){width:36vmax;height:36vmax;left:38%;top:42%;background:var(--amber);opacity:.5;animation-delay:-12s}
-          @keyframes drift{to{transform:translate(12vmax,-9vmax) scale(1.25)}}
-          .glass{background:var(--glass);border:1px solid var(--line);-webkit-backdrop-filter:blur(28px) saturate(160%);backdrop-filter:blur(28px) saturate(160%);box-shadow:0 24px 70px rgba(0,0,0,.45)}
-          #lock{position:fixed;inset:0;display:grid;place-items:center;padding:24px}
-          .card{width:min(460px,100%);padding:44px 36px 36px;border-radius:40px;text-align:center}
-          .logo{width:108px;height:108px;margin-bottom:20px;filter:drop-shadow(0 18px 44px rgba(59,110,245,.7))}
-          .logo path[class]{fill:none;stroke-width:4.4;stroke-linecap:round;animation:pulse 2.4s ease-in-out infinite}
-          .a2{animation-delay:.25s!important}.a3{animation-delay:.5s!important}
-          @keyframes pulse{0%,100%{opacity:.3}40%{opacity:1}}
-          h1{margin:0 0 8px;font-size:40px;font-weight:800;letter-spacing:-.03em}
-          .card p{margin:0 0 26px;color:var(--mute)}
-          #pin{width:100%;padding:16px;border-radius:22px;border:1px solid var(--line);background:rgba(0,0,0,.3);color:var(--ink);font:700 32px ui-rounded,system-ui;letter-spacing:.45em;text-align:center;outline:none}
-          #pin:focus{border-color:var(--amber);box-shadow:0 0 0 4px rgba(255,184,77,.2)}
-          .go{width:100%;margin-top:14px;padding:17px;border:0;border-radius:22px;background:var(--amber);color:#2A1B00;font:800 18px ui-rounded,system-ui}
-          .go:active{transform:scale(.98)}
-          #err{min-height:22px;margin-top:14px;color:var(--bad);font-size:14px}
-          #app{position:fixed;inset:0;display:none;touch-action:none}
-          #scr{position:absolute;background:#05090c;box-shadow:0 0 0 1px var(--line),0 30px 120px rgba(0,0,0,.6);pointer-events:none;-webkit-user-drag:none}
-          #chrome{position:fixed;inset:0;pointer-events:none;z-index:5;opacity:0;transition:opacity .3s}
-          #chrome.show{opacity:1}#chrome>*{pointer-events:none}#chrome.show>*{pointer-events:auto}
-          .chips{position:absolute;top:calc(14px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);display:flex;gap:8px}
-          .chip{display:inline-flex;align-items:center;gap:8px;padding:7px 15px;border-radius:99px;font-size:13px;color:var(--mute)}
-          #dot{width:8px;height:8px;border-radius:50%;background:var(--bad)}
-          .dock{position:absolute;bottom:calc(54px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);display:flex;gap:10px;padding:10px;border-radius:36px}
-          .btn{width:56px;height:56px;border-radius:22px;border:1px solid var(--line);background:rgba(255,255,255,.06);color:var(--ink);display:grid;place-items:center;transition:transform .12s,background .12s}
-          .btn:active,.btn.on{transform:scale(.9);background:rgba(255,184,77,.3);border-color:var(--amber)}
-          .btn svg{width:26px;height:26px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
-          #grab{display:none;position:fixed;bottom:env(safe-area-inset-bottom);left:50%;transform:translateX(-50%);width:140px;height:40px;place-items:center;z-index:6}
-          #grab i{width:70px;height:5px;border-radius:9px;background:rgba(255,255,255,.4)}
-          .dot{position:fixed;width:64px;height:64px;margin:-32px 0 0 -32px;border-radius:50%;background:radial-gradient(circle,rgba(255,184,77,.55),rgba(255,184,77,.12));border:2px solid rgba(255,255,255,.75);pointer-events:none;z-index:4;animation:dotin .15s ease-out}
-          @keyframes dotin{from{transform:scale(.5);opacity:0}}
-          .tbar{position:fixed;left:50%;bottom:calc(128px + env(safe-area-inset-bottom));width:min(580px,92vw);display:flex;gap:10px;padding:10px;border-radius:28px;transform:translate(-50%,400%);transition:transform .3s;z-index:7}
-          .tbar.on{transform:translate(-50%,0)}
-          .tbar input{flex:1;min-width:0;padding:13px 16px;border-radius:20px;border:1px solid var(--line);background:rgba(0,0,0,.35);color:var(--ink);font:17px ui-rounded,system-ui;outline:none}
-          .tbar button{padding:0 22px;border:0;border-radius:20px;background:var(--amber);color:#2A1B00;font:800 16px ui-rounded,system-ui}
-          @media(prefers-reduced-motion:reduce){.aur i,.logo path[class]{animation:none}.tbar,#chrome{transition:none}}
-          </style></head><body>
-          <div class="aur"><i></i><i></i><i></i></div>
-          <div id="lock"><div class="glass card">
-            <svg class="logo" viewBox="0 0 108 108"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0D1B24"/><stop offset="1" stop-color="#1E3A8A"/></linearGradient></defs><rect width="108" height="108" rx="28" fill="url(#g)"/><path d="M36,33h14a5,5 0 0 1 5,5v32a5,5 0 0 1 -5,5h-14a5,5 0 0 1 -5,-5v-32a5,5 0 0 1 5,-5z" fill="none" stroke="#fff" stroke-width="3.6"/><circle cx="43" cy="54" r="3" fill="#fff"/><path class="a1" d="M66.36,47.64A9,9 0 0 1 66.36,60.36" stroke="#FFB84D"/><path class="a2" d="M72.02,41.98A17,17 0 0 1 72.02,66.02" stroke="#5CE1C6"/><path class="a3" d="M77.68,36.32A25,25 0 0 1 77.68,71.68" stroke="#7AA2FF"/></svg>
-            <h1>PhoneLink</h1><p>Gib die 6-stellige PIN ein, die auf deinem Handy steht.</p>
-            <input id="pin" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="off">
-            <button class="go" id="go">Mit Handy verbinden</button><div id="err"></div>
-          </div></div>
-          <div id="app"><img id="scr" alt="Handy-Bildschirm"></div>
-          <div id="chrome">
-            <div class="chips"><span class="chip glass"><i id="dot"></i><span id="live">Verbinde …</span></span><span class="chip glass" id="ctl">Nur Ansicht</span></div>
-            <div class="dock glass">
-              <button class="btn" data-k="back" aria-label="Zurück"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
-              <button class="btn" data-k="home" aria-label="Home"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/></svg></button>
-              <button class="btn" data-k="recents" aria-label="Letzte Apps"><svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="3.5"/></svg></button>
-              <button class="btn" data-k="notifications" aria-label="Mitteilungen"><svg viewBox="0 0 24 24"><path d="M6 17h12l-1.5-2v-4a4.5 4.5 0 00-9 0v4L6 17zM10 20h4"/></svg></button>
-              <button class="btn" id="kb" aria-label="Text eingeben"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="3"/><path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10"/></svg></button>
-              <button class="btn" id="fs" aria-label="Vollbild"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
-            </div>
-          </div>
-          <div id="grab" aria-label="Menü"><i></i></div>
-          <div class="tbar glass" id="tbar"><input id="txt" placeholder="Text für das markierte Eingabefeld" autocomplete="off"><button id="send">Senden</button></div>
-          <script>
-          const $=s=>document.querySelector(s);let K='',A=9/19.5,ht;
-          try{K=localStorage.getItem('k')||''}catch(e){}
-          $('#pin').value=K;
-          const q=(p,o={})=>fetch(p+'?'+new URLSearchParams({k:K,...o}),{method:'POST'}).catch(()=>{});
-          function live(on){$('#dot').style.background=on?'var(--mint)':'var(--bad)';$('#live').textContent=on?'Live':'Getrennt – verbinde neu …'}
-          function stream(){$('#scr').src='/stream?k='+K+'&t='+Date.now()}
-          $('#scr').onload=()=>live(true);
-          $('#scr').onerror=()=>{live(false);setTimeout(stream,1500)};
-          function fit(){const vw=innerWidth,vh=innerHeight;let h=vh,w=h*A;if(w>vw){w=vw;h=w/A}const s=$('#scr').style;s.width=w+'px';s.height=h+'px';s.left=(vw-w)/2+'px';s.top=(vh-h)/2+'px'}
-          addEventListener('resize',fit);
-          function showUI(){const c=$('#chrome');c.classList.add('show');clearTimeout(ht);ht=setTimeout(()=>{if(!$('#tbar').classList.contains('on'))c.classList.remove('show')},4000)}
-          $('#grab').onclick=()=>{const c=$('#chrome');if(c.classList.contains('show')){c.classList.remove('show');clearTimeout(ht)}else showUI()};
-          $('#chrome').addEventListener('pointerdown',showUI);
-          async function info(first){
-            try{const r=await fetch('/info?k='+K);if(!r.ok)throw 0;const i=await r.json();
-              if(!i.w&&first){$('#err').textContent='Starte zuerst die Spiegelung auf dem Handy.';return false}
-              if(i.w){A=i.w/i.h;fit()}
-              $('#ctl').textContent=i.ctl?'Steuerung aktiv':'Nur Ansicht';$('#ctl').style.color=i.ctl?'var(--mint)':'var(--mute)';return true
-            }catch(e){if(first)$('#err').textContent='PIN falsch oder Handy nicht erreichbar.';return false}
-          }
-          async function connect(){
-            K=$('#pin').value.trim();$('#err').textContent='';
-            if(!(await info(true)))return;
-            try{localStorage.setItem('k',K)}catch(e){}
-            $('#lock').style.display='none';$('#app').style.display='block';$('#grab').style.display='grid';
-            fit();stream();openWS();showUI();setInterval(()=>info(false),3000)
-          }
-          $('#go').onclick=connect;$('#pin').onkeydown=e=>{if(e.key==='Enter')connect()};
-          document.querySelectorAll('[data-k]').forEach(b=>b.onclick=()=>q('/key',{name:b.dataset.k}));
-          $('#kb').onclick=()=>{const t=$('#tbar');t.classList.toggle('on');$('#kb').classList.toggle('on');if(t.classList.contains('on'))$('#txt').focus();else showUI()};
-          const sendTxt=()=>q('/text',{t:$('#txt').value});
-          $('#send').onclick=sendTxt;$('#txt').onkeydown=e=>{if(e.key==='Enter')sendTxt()};
-          $('#fs').onclick=()=>{const d=document.documentElement;(d.requestFullscreen||d.webkitRequestFullscreen||(()=>{})).call(d)};
-          const st=$('#app');let ws,pend={},raf=0;const ids=new Map(),dots=new Map();
-          function openWS(){ws=new WebSocket('ws://'+location.host+'/ws?k='+K);ws.onclose=()=>setTimeout(openWS,1500)}
-          const send=m=>{if(ws&&ws.readyState===1)ws.send(m)};
-          const cl=v=>Math.min(1,Math.max(0,v));
-          const nrm=e=>{const r=$('#scr').getBoundingClientRect();return cl((e.clientX-r.left)/r.width).toFixed(4)+' '+cl((e.clientY-r.top)/r.height).toFixed(4)};
-          const inRect=e=>{const r=$('#scr').getBoundingClientRect();return e.clientX>=r.left&&e.clientX<=r.right&&e.clientY>=r.top&&e.clientY<=r.bottom};
-          function nid(){let i=0;const u=[...ids.values()];while(u.includes(i))i++;return i}
-          function dot(e){let el=dots.get(e.pointerId);if(!el){el=document.createElement('i');el.className='dot';document.body.appendChild(el);dots.set(e.pointerId,el)}el.style.left=e.clientX+'px';el.style.top=e.clientY+'px'}
-          st.addEventListener('pointerdown',e=>{if(!inRect(e))return;st.setPointerCapture(e.pointerId);const i=nid();ids.set(e.pointerId,i);send('d '+i+' '+nrm(e));dot(e)});
-          st.addEventListener('pointermove',e=>{const i=ids.get(e.pointerId);if(i===undefined)return;pend[i]=nrm(e);dot(e);if(!raf)raf=requestAnimationFrame(()=>{raf=0;for(const k in pend)send('m '+k+' '+pend[k]);pend={}})});
-          const up=e=>{const i=ids.get(e.pointerId);if(i===undefined)return;delete pend[i];send('u '+i+' '+nrm(e));ids.delete(e.pointerId);const el=dots.get(e.pointerId);if(el){el.remove();dots.delete(e.pointerId)}};
-          st.addEventListener('pointerup',up);st.addEventListener('pointercancel',up);
-          document.addEventListener('gesturestart',e=>e.preventDefault());
 
-          </script></body></html>
-          EOF
+      # ------------------------------------------------------------------
       - name: APK bauen
-        run: gradle assembleDebug --no-daemon
-      - uses: actions/upload-artifact@v4
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: APK hochladen
+        uses: actions/upload-artifact@v4
         with:
-          name: PhoneLink-APK
-          path: app/build/outputs/apk/debug/*.apk
+          name: Stride-APK
+          path: app/build/outputs/apk/debug/app-debug.apk

@@ -5,6 +5,8 @@ on: [push, workflow_dispatch]
 jobs:
   android:
     runs-on: ubuntu-latest
+    env:
+      SERVER_URL: https://de.flammosmp.net/api.php   # <- hier deine api.php-Adresse eintragen
     steps:
       - uses: actions/setup-node@v4
         with: { node-version: 20 }
@@ -42,7 +44,7 @@ jobs:
           #lv{position:absolute;right:16px;top:max(16px,env(safe-area-inset-top));width:28vw;max-width:180px;aspect-ratio:3/4;object-fit:cover;border-radius:22px;border:1px solid var(--b);box-shadow:0 10px 40px #0008;transform:scaleX(-1)}
           .bar{position:absolute;bottom:max(24px,env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);display:flex;gap:14px;padding:12px;border-radius:40px;background:var(--g);border:1px solid var(--b);backdrop-filter:blur(30px);-webkit-backdrop-filter:blur(30px)}
           .bar button{width:62px;height:62px;border-radius:50%;padding:0;font-size:24px}
-          .end{background:var(--r)!important;border:0!important}
+          .end{background:var(--r)!important;border:0!important}.bar .off{background:#ffffffd9!important;border:0}
           #st{position:absolute;top:max(18px,env(safe-area-inset-top));left:18px;padding:8px 14px;border-radius:20px;background:var(--g);border:1px solid var(--b);backdrop-filter:blur(20px);font-size:13px;font-variant-numeric:tabular-nums}
           #ring{position:fixed;left:50%;top:max(16px,env(safe-area-inset-top));width:min(380px,92vw);transform:translate(-50%,-160%);transition:.55s cubic-bezier(.2,1.2,.3,1);z-index:9}
           #ring.on{transform:translate(-50%,0)}#ring .card{padding:18px;gap:12px}
@@ -54,8 +56,7 @@ jobs:
           <section class="s on" id="auth"><div class="card">
           <svg class="logo" viewBox="0 0 1024 1024"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7c5cff"/><stop offset="1" stop-color="#19d3c5"/></linearGradient></defs><rect width="1024" height="1024" fill="url(#g)"/><circle cx="512" cy="512" r="300" fill="#fff" fill-opacity=".25" stroke="#fff" stroke-opacity=".6" stroke-width="10"/><path d="M430 400v224l190-112z" fill="#fff"/></svg>
           <h1>Halo</h1><p class="m" id="msg">Anrufen in 4K, ohne Verzögerung.</p>
-          <input id="srv" placeholder="Server-URL (https://…/api.php)" hidden>
-          <input id="nm" placeholder="Benutzername" autocomplete="username">
+                    <input id="nm" placeholder="Benutzername" autocomplete="username">
           <button class="pri" id="pk">Mit Passkey anmelden</button>
           <button id="pkr">Neuen Account mit Passkey erstellen</button>
           <input id="pw" type="password" placeholder="Passwort (ohne Passkey)" autocomplete="current-password">
@@ -70,21 +71,21 @@ jobs:
           </div></section>
 
           <section class="s" id="call"><video id="rv" autoplay playsinline></video><video id="lv" autoplay playsinline muted></video><div id="st">Verbinde…</div>
-          <div class="bar"><button id="mu">🎙️</button><button id="cm">📷</button><button class="end" id="hu">✕</button></div></section>
+          <div class="bar"><button id="mu">🎙️</button><button id="fl">🔄</button><button id="cm">📷</button><button class="end" id="hu">✕</button></div></section>
 
           <div id="ring"><div class="card pulse"><h1 id="rn" style="font-size:22px"></h1><div class="row"><button class="end" id="no">Ablehnen</button><button class="pri" id="ok">Annehmen</button></div></div></div>
 
           <script>
           const $=i=>document.getElementById(i),app=!!window.Capacitor;
-          let API=localStorage.srv||'api.php',S=JSON.parse(localStorage.sess||'null'),pc,ls,peer,offer,pend=[],tm,t0;
-          if(app){$('srv').hidden=false;$('srv').value=localStorage.srv||''}
+          const SERVER='__SERVER__';let API=app?SERVER:'api.php',S=JSON.parse(localStorage.sess||'null'),pc,ls,peer,offer,pend=[],tm,t0;
+          
           const show=i=>document.querySelectorAll('.s').forEach(s=>s.classList.toggle('on',s.id===i));
           const b2u=b=>btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
           const u2b=s=>Uint8Array.from(atob(s.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0));
           async function api(a,d={}){const r=await fetch(API+'?a='+a,{method:'POST',body:JSON.stringify({token:S&&S.token,...d})});const j=await r.json();if(j.error)throw j.error;return j}
           const note=t=>$('msg').textContent=t;
           function login(s){S=s;localStorage.sess=JSON.stringify(s);$('my').textContent=s.number;show('home');poll()}
-          function srv(){if(app){localStorage.srv=API=$('srv').value.trim()}}
+          function srv(){}
           const guard=f=>async()=>{try{srv();await f()}catch(e){note(e.message||e)}};
 
           $('pkr').onclick=guard(async()=>{const n=$('nm').value.trim();if(!n)throw'Benutzername fehlt';
@@ -103,11 +104,12 @@ jobs:
           // ---- Anrufe ----
           const cfg={iceServers:[{urls:'stun:stun.l.google.com:19302'}],bundlePolicy:'max-bundle'};
           const send=(to,type,data)=>api('send',{to,type,data}).catch(()=>{});
-          async function media(video){
-           const c=video?{width:{ideal:3840},height:{ideal:2160},frameRate:{ideal:120,min:30}}:false;
+          let face='user';
+          async function media(video){face='user';$('lv').style.transform='scaleX(-1)';$('mu').textContent='🎙️';$('cm').textContent='📷';$('mu').classList.remove('off');$('cm').classList.remove('off');
+           const c=video?{facingMode:face,width:{ideal:3840},height:{ideal:2160},frameRate:{ideal:120,min:30}}:false;
            try{ls=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true},video:c})}
            catch{ls=await navigator.mediaDevices.getUserMedia({audio:true,video})}
-           $('lv').srcObject=ls;$('lv').style.display=video?'':'none';$('cm').style.display=video?'':'none'}
+           $('lv').srcObject=ls;$('lv').style.display=video?'':'none';$('cm').style.display=video?'':'none';$('fl').style.display=video?'':'none'}
           function mk(){pc=new RTCPeerConnection(cfg);
            ls.getTracks().forEach(t=>{if(t.kind==='video')t.contentHint='motion';pc.addTrack(t,ls)});
            pc.ontrack=e=>{$('rv').srcObject=e.streams[0];e.receiver.jitterBufferTarget=0;e.receiver.playoutDelayHint=0};
@@ -126,8 +128,13 @@ jobs:
           function end(local){if(peer&&local)send(peer,'hangup');clearInterval(tm);pc&&pc.close();pc=0;ls&&ls.getTracks().forEach(t=>t.stop());ls=0;peer=0;offer=0;pend=[];$('ring').classList.remove('on');$('rv').srcObject=null;if(S)show('home')}
           $('ca').onclick=()=>call(false);$('cv').onclick=()=>call(true);$('hu').onclick=()=>end(true);
           $('ok').onclick=accept;$('no').onclick=()=>{send(peer,'hangup');end()};
-          $('mu').onclick=()=>{const t=ls.getAudioTracks()[0];t.enabled=!t.enabled;$('mu').style.opacity=t.enabled?1:.4};
-          $('cm').onclick=()=>{const t=ls.getVideoTracks()[0];t.enabled=!t.enabled;$('cm').style.opacity=t.enabled?1:.4};
+          $('mu').onclick=()=>{const t=ls.getAudioTracks()[0];t.enabled=!t.enabled;$('mu').textContent=t.enabled?'🎙️':'🔇';$('mu').classList.toggle('off',!t.enabled)};
+          $('cm').onclick=()=>{const t=ls.getVideoTracks()[0];t.enabled=!t.enabled;$('cm').textContent=t.enabled?'📷':'🚫';$('cm').classList.toggle('off',!t.enabled)};
+          $('fl').onclick=async()=>{if(!ls)return;face=face==='user'?'environment':'user';const o=ls.getVideoTracks()[0];o&&o.stop();
+           const n=(await navigator.mediaDevices.getUserMedia({video:{facingMode:face,width:{ideal:3840},height:{ideal:2160},frameRate:{ideal:120,min:30}}})).getVideoTracks()[0];
+           n.contentHint='motion';o&&ls.removeTrack(o);ls.addTrack(n);n.enabled=!$('cm').classList.contains('off');
+           const v=pc&&pc.getSenders().find(x=>x.track&&x.track.kind==='video');v&&await v.replaceTrack(n);
+           $('lv').srcObject=ls;$('lv').style.transform=face==='user'?'scaleX(-1)':'none'};
 
           async function poll(){while(S){try{for(const m of await api('poll')){
            if(m.type==='offer'){if(pc||offer){send(m.from,'hangup');continue}peer=m.from;offer=m;$('rn').textContent=m.name+' ('+m.from+') ruft an';$('ring').classList.add('on')}
@@ -205,6 +212,7 @@ jobs:
           cp client/index.html server/index.html
           mkdir -p server/data && echo 'Require all denied' > server/data/.htaccess
 
+      - run: sed -i "s#__SERVER__#$SERVER_URL#" client/index.html
       - run: npm install
       - run: cp client/index.html www/
       - run: rsvg-convert -w 1024 -h 1024 assets/logo.svg -o assets/icon-only.png

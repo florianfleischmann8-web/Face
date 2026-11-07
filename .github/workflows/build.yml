@@ -15,6 +15,9 @@ jobs:
       - name: Projektdateien erzeugen
         run: |
           mkdir -p app/src/main/java/de/fernbedienung
+          mkdir -p app/src/main/res/drawable
+          mkdir -p app/src/main/res/values
+          mkdir -p app/src/main/res/mipmap-anydpi-v26
           cat > settings.gradle.kts <<'EOF_0'
           pluginManagement {
               repositories { google(); mavenCentral(); gradlePluginPortal() }
@@ -76,6 +79,8 @@ jobs:
 
               <application
                   android:label="Fernbedienung"
+                  android:icon="@mipmap/ic_launcher"
+                  android:roundIcon="@mipmap/ic_launcher"
                   android:usesCleartextTraffic="true"
                   android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
                   <activity android:name=".MainActivity" android:exported="true">
@@ -87,6 +92,40 @@ jobs:
               </application>
           </manifest>
           EOF_4
+          cat > app/src/main/res/values/colors.xml <<'EOF_8'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <color name="ic_bg">#1B1F27</color>
+          </resources>
+          EOF_8
+          cat > app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml <<'EOF_9'
+          <?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@color/ic_bg" />
+              <foreground android:drawable="@drawable/ic_fg" />
+          </adaptive-icon>
+          EOF_9
+          cat > app/src/main/res/drawable/ic_fg.xml <<'EOF_10'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp"
+              android:height="108dp"
+              android:viewportWidth="108"
+              android:viewportHeight="108">
+              <path
+                  android:fillColor="#FFFFFF"
+                  android:pathData="M40,24h28a6,6 0 0 1 6,6v48a6,6 0 0 1 -6,6h-28a6,6 0 0 1 -6,-6v-48a6,6 0 0 1 6,-6z" />
+              <path
+                  android:fillColor="#E5484D"
+                  android:pathData="M54,30m-4,0a4,4 0 1,1 8,0a4,4 0 1,1 -8,0" />
+              <path
+                  android:fillColor="#3D7BFF"
+                  android:pathData="M54,50m-9,0a9,9 0 1,1 18,0a9,9 0 1,1 -18,0" />
+              <path
+                  android:fillColor="#C5CAD3"
+                  android:pathData="M42,64h8v5h-8z M58,64h8v5h-8z M42,72h8v5h-8z M58,72h8v5h-8z" />
+          </vector>
+          EOF_10
           cat > app/src/main/java/de/fernbedienung/Remotes.kt <<'EOF_5'
           package de.fernbedienung
 
@@ -116,7 +155,7 @@ jobs:
 
           /** TVs nutzen im LAN selbstsignierte Zertifikate, daher wird hier nicht geprueft (nur lokale Geraete!). */
           @SuppressLint("CustomX509TrustManager", "TrustAllX509TrustManager")
-          fun unsafeClient(): OkHttpClient {
+          fun unsafeClient(pingSeconds: Long = 20): OkHttpClient {
               val tm = object : X509TrustManager {
                   override fun checkClientTrusted(c: Array<X509Certificate>, a: String) {}
                   override fun checkServerTrusted(c: Array<X509Certificate>, a: String) {}
@@ -129,7 +168,7 @@ jobs:
                   .hostnameVerifier { _, _ -> true }
                   .connectTimeout(4, TimeUnit.SECONDS)
                   .readTimeout(0, TimeUnit.SECONDS)
-                  .pingInterval(20, TimeUnit.SECONDS)
+                  .pingInterval(pingSeconds, TimeUnit.SECONDS)
                   .build()
           }
 
@@ -217,9 +256,14 @@ jobs:
               private val info: (String) -> Unit
           ) : NetRemote {
               private val client = unsafeClient()
+              // Der Tasten-Kanal bekommt kein Ping, sonst trennt ihn der TV manchmal.
+              private val pointerClient = unsafeClient(0)
               private var ws: WebSocket? = null
               private var pointer: WebSocket? = null
               @Volatile private var ready = false
+              @Volatile private var pointerOpen = false
+              @Volatile private var pointerRequested = false
+              private val queued = ArrayList<String>()
               private var muted = false
               private var playing = true
               private var n = 0
@@ -228,15 +272,50 @@ jobs:
 
               private fun registerJson(): String {
                   val perms = JSONArray(listOf(
-                      "LAUNCH", "CONTROL_AUDIO", "CONTROL_POWER", "CONTROL_INPUT_MEDIA_PLAYBACK",
-                      "CONTROL_INPUT_TV", "CONTROL_INPUT_TEXT", "CONTROL_MOUSE_AND_KEYBOARD",
-                      "CONTROL_INPUT_JOYSTICK", "READ_CURRENT_CHANNEL"
+                      "LAUNCH", "LAUNCH_WEBAPP", "APP_TO_APP", "CLOSE", "TEST_OPEN", "TEST_PROTECTED",
+                      "CONTROL_AUDIO", "CONTROL_DISPLAY", "CONTROL_INPUT_JOYSTICK", "CONTROL_INPUT_MEDIA_RECORDING",
+                      "CONTROL_INPUT_MEDIA_PLAYBACK", "CONTROL_INPUT_TV", "CONTROL_POWER", "CONTROL_TV_SCREEN",
+                      "CONTROL_TV_STANBY", "CONTROL_BLUETOOTH", "CONTROL_INPUT_TEXT", "CONTROL_MOUSE_AND_KEYBOARD",
+                      "READ_APP_STATUS", "READ_CURRENT_CHANNEL", "READ_INPUT_DEVICE_LIST", "READ_NETWORK_STATE",
+                      "READ_RUNNING_APPS", "READ_TV_CHANNEL_LIST", "READ_POWER_STATE", "READ_COUNTRY_INFO",
+                      "READ_SETTINGS", "READ_INSTALLED_APPS", "READ_LGE_SDX", "READ_NOTIFICATIONS",
+                      "READ_UPDATE_INFO", "SEARCH", "WRITE_SETTINGS", "WRITE_NOTIFICATION_ALERT",
+                      "WRITE_NOTIFICATION_TOAST", "UPDATE_FROM_REMOTE_APP"
                   ))
                   // Ohne Signatur: Der TV zeigt den Koppeln-Dialog und gewaehrt die hier genannten Rechte.
-                  val manifest = JSONObject().put("manifestVersion", 1).put("appVersion", "1.0").put("permissions", perms)
+                  val manifest = JSONObject().put("manifestVersion", 1).put("appVersion", "1.1").put("permissions", perms)
                   val payload = JSONObject().put("forcePairing", false).put("pairingType", "PROMPT").put("manifest", manifest)
-                  prefs.getString("lg_$ip", null)?.let { payload.put("client-key", it) }
+                  prefs.getString("lg2_$ip", null)?.let { payload.put("client-key", it) }
                   return JSONObject().put("type", "register").put("id", "register_0").put("payload", payload).toString()
+              }
+
+              private fun resetPointer() {
+                  pointerOpen = false; pointerRequested = false
+                  try { pointer?.cancel() } catch (_: Exception) {}
+                  pointer = null
+              }
+
+              private fun requestPointer() {
+                  if (pointerRequested || !ready) return
+                  pointerRequested = true
+                  ws?.send(JSONObject().put("id", "ptr").put("type", "request")
+                      .put("uri", "ssap://com.webos.service.networkinput/getPointerInputSocket").toString())
+              }
+
+              private fun openPointer(path: String) {
+                  pointer = pointerClient.newWebSocket(Request.Builder().url(path).build(), object : WebSocketListener() {
+                      override fun onOpen(webSocket: WebSocket, response: Response) {
+                          pointerOpen = true
+                          synchronized(queued) { queued.forEach { webSocket.send(it) }; queued.clear() }
+                      }
+                      override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                          pointerOpen = false; pointerRequested = false; pointer = null
+                          info("LG: Tasten-Kanal Fehler (${t.message})")
+                      }
+                      override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                          pointerOpen = false; pointerRequested = false; pointer = null
+                      }
+                  })
               }
 
               private fun connect(secure: Boolean) {
@@ -252,26 +331,28 @@ jobs:
                               when (j.optString("type")) {
                                   "registered" -> {
                                       j.optJSONObject("payload")?.optString("client-key")?.takeIf { it.isNotEmpty() }
-                                          ?.let { prefs.edit().putString("lg_$ip", it).apply() }
+                                          ?.let { prefs.edit().putString("lg2_$ip", it).apply() }
                                       ready = true
                                       info("LG verbunden")
-                                      webSocket.send(JSONObject().put("id", "ptr").put("type", "request")
-                                          .put("uri", "ssap://com.webos.service.networkinput/getPointerInputSocket").toString())
+                                      requestPointer()
                                   }
                                   "response" -> if (j.optString("id") == "ptr") {
                                       val path = j.optJSONObject("payload")?.optString("socketPath")
-                                      if (!path.isNullOrEmpty())
-                                          pointer = client.newWebSocket(Request.Builder().url(path).build(), object : WebSocketListener() {})
+                                      if (!path.isNullOrEmpty()) openPointer(path)
+                                      else { pointerRequested = false; info("LG: Tasten-Kanal abgelehnt, bitte neu koppeln") }
                                   }
-                                  "error" -> info("LG: " + j.optString("error"))
+                                  "error" -> {
+                                      if (j.optString("id") == "ptr") pointerRequested = false
+                                      info("LG: " + j.optString("error"))
+                                  }
                               }
                           } catch (_: Exception) {}
                       }
                       override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                          ready = false; ws = null
+                          ready = false; ws = null; resetPointer()
                           if (secure) connect(false) else info("LG: Verbindung fehlgeschlagen (${t.message})")
                       }
-                      override fun onClosed(webSocket: WebSocket, code: Int, reason: String) { ready = false; ws = null }
+                      override fun onClosed(webSocket: WebSocket, code: Int, reason: String) { ready = false; ws = null; resetPointer() }
                   })
               }
 
@@ -281,7 +362,15 @@ jobs:
                   fun req(uri: String, payload: JSONObject = JSONObject()) {
                       ws?.send(JSONObject().put("id", "r${n++}").put("type", "request").put("uri", uri).put("payload", payload).toString())
                   }
-                  fun btn(name: String) { pointer?.send("type:button\nname:$name\n\n") }
+                  fun btn(name: String) {
+                      val msg = "type:button\nname:$name\n\n"
+                      if (pointerOpen && pointer != null) {
+                          if (pointer?.send(msg) != true) resetPointer()
+                      } else {
+                          synchronized(queued) { if (queued.size < 5) queued.add(msg) }
+                          requestPointer()
+                      }
+                  }
                   when (key) {
                       Key.POWER -> req("ssap://system/turnOff")
                       Key.VOL_UP -> req("ssap://audio/volumeUp")
@@ -290,12 +379,13 @@ jobs:
                       Key.CH_UP -> req("ssap://tv/channelUp")
                       Key.CH_DOWN -> req("ssap://tv/channelDown")
                       Key.UP -> btn("UP"); Key.DOWN -> btn("DOWN"); Key.LEFT -> btn("LEFT"); Key.RIGHT -> btn("RIGHT")
-                      Key.OK -> btn("ENTER"); Key.BACK -> btn("BACK"); Key.HOME -> btn("HOME"); Key.MENU -> btn("MENU")
+                      Key.OK -> btn("ENTER"); Key.BACK -> btn("BACK"); Key.MENU -> btn("MENU")
+                      Key.HOME -> req("ssap://system.launcher/launch", JSONObject().put("id", "com.webos.app.home"))
                       Key.PLAY -> { playing = !playing; req(if (playing) "ssap://media.controls/play" else "ssap://media.controls/pause") }
                   }
               }
 
-              override fun close() { pointer?.close(1000, null); ws?.close(1000, null); pointer = null; ws = null }
+              override fun close() { resetPointer(); ws?.close(1000, null); ws = null }
           }
 
           // ---------------------------------------------------------------- Roku (HTTP ECP)
@@ -417,9 +507,14 @@ jobs:
           import android.content.Intent
           import android.content.IntentFilter
           import android.content.SharedPreferences
+          import android.content.res.ColorStateList
+          import android.graphics.Typeface
+          import android.graphics.drawable.GradientDrawable
+          import android.graphics.drawable.RippleDrawable
           import android.net.wifi.WifiManager
           import android.os.Build
           import android.os.Bundle
+          import android.view.Gravity
           import android.view.HapticFeedbackConstants
           import android.view.View
           import android.widget.*
@@ -464,6 +559,13 @@ jobs:
           }
 
           class MainActivity : Activity() {
+              private val cBg = 0xFF101216.toInt()
+              private val cBtn = 0xFF252A33.toInt()
+              private val cAccent = 0xFF3D7BFF.toInt()
+              private val cRed = 0xFFD93A3A.toInt()
+              private val cText = 0xFFF2F4F8.toInt()
+              private val cMuted = 0xFF9AA0AA.toInt()
+
               private lateinit var prefs: SharedPreferences
               private lateinit var listBox: LinearLayout
               private lateinit var status: TextView
@@ -474,9 +576,13 @@ jobs:
               private var btHid: BtHid? = null
               private var rxRegistered = false
 
+              @Suppress("DEPRECATION")
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
                   prefs = getSharedPreferences("fb", MODE_PRIVATE)
+                  window.statusBarColor = cBg
+                  window.navigationBarColor = cBg
+                  window.decorView.setBackgroundColor(cBg)
                   val p = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION)
                   if (Build.VERSION.SDK_INT >= 31) {
                       p += Manifest.permission.BLUETOOTH_SCAN
@@ -500,13 +606,28 @@ jobs:
               // ------------------------------------------------------------ UI helpers
               private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
-              private fun tv(text: String, size: Float = 14f) = TextView(this).apply {
-                  this.text = text; textSize = size; setPadding(dp(4), dp(6), dp(4), dp(6))
+              private fun shape(color: Int, r: Int = 18) = GradientDrawable().apply {
+                  setColor(color); cornerRadius = dp(r).toFloat()
               }
 
-              private fun btn(text: String, onClick: () -> Unit) = Button(this).apply {
+              private fun lp(w: Int, h: Int, weight: Float = 0f) =
+                  LinearLayout.LayoutParams(w, h, weight).apply { setMargins(dp(4), dp(4), dp(4), dp(4)) }
+
+              private fun tv(text: String, size: Float = 14f, color: Int = cText, bold: Boolean = false) = TextView(this).apply {
+                  this.text = text; textSize = size; setTextColor(color)
+                  if (bold) setTypeface(typeface, Typeface.BOLD)
+                  setPadding(dp(4), dp(6), dp(4), dp(6))
+              }
+
+              private fun btn(text: String, color: Int = cBtn, onClick: () -> Unit) = Button(this).apply {
                   this.text = text
                   isAllCaps = false
+                  textSize = 16f
+                  setTextColor(cText)
+                  setTypeface(typeface, Typeface.BOLD)
+                  stateListAnimator = null
+                  minHeight = 0; minimumHeight = 0
+                  background = RippleDrawable(ColorStateList.valueOf(0x44FFFFFF), shape(color), null)
                   setOnClickListener { it.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP); onClick() }
               }
 
@@ -518,14 +639,15 @@ jobs:
                   inRemote = false
                   val col = LinearLayout(this).apply {
                       orientation = LinearLayout.VERTICAL
-                      setPadding(dp(16), dp(40), dp(16), dp(16))
+                      setBackgroundColor(cBg)
+                      setPadding(dp(16), dp(48), dp(16), dp(16))
                   }
-                  col.addView(tv("Fernbedienung", 24f))
+                  col.addView(tv("Fernbedienung", 30f, cText, true))
                   val row = LinearLayout(this)
-                  row.addView(btn("WLAN scannen") { scanWifi() }, LinearLayout.LayoutParams(0, -2, 1f))
-                  row.addView(btn("Bluetooth scannen") { scanBt() }, LinearLayout.LayoutParams(0, -2, 1f))
+                  row.addView(btn("WLAN scannen", cAccent) { scanWifi() }, lp(0, dp(56), 1f))
+                  row.addView(btn("Bluetooth scannen") { scanBt() }, lp(0, dp(56), 1f))
                   col.addView(row)
-                  status = tv("Starte einen Scan. Angezeigt werden nur bekannte Marken (LG, Samsung, Sony, Epson, ...).")
+                  status = tv("Starte einen Scan. Angezeigt werden nur bekannte Marken (LG, Samsung, Sony, Epson, ...).", 14f, cMuted)
                   col.addView(status)
                   listBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
                   col.addView(ScrollView(this).apply { addView(listBox) }, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -538,7 +660,10 @@ jobs:
                   found.values.forEach { d ->
                       val addr = d.ip ?: d.bt?.address ?: ""
                       val type = if (d.bt != null) "Bluetooth" else d.kind.label
-                      listBox.addView(btn("${d.name}\n$addr · $type") { showRemote(d) }, LinearLayout.LayoutParams(-1, -2))
+                      val b = btn("${d.name}\n$addr · $type") { showRemote(d) }
+                      b.gravity = Gravity.START or Gravity.CENTER_VERTICAL
+                      b.setPadding(dp(18), dp(12), dp(18), dp(12))
+                      listBox.addView(b, lp(-1, -2))
                   }
               }
 
@@ -672,11 +797,12 @@ jobs:
                   inRemote = true
                   val col = LinearLayout(this).apply {
                       orientation = LinearLayout.VERTICAL
-                      setPadding(dp(16), dp(32), dp(16), dp(16))
+                      setBackgroundColor(cBg)
+                      setPadding(dp(16), dp(40), dp(16), dp(24))
                   }
-                  col.addView(btn("← Zurueck") { showMain() })
-                  col.addView(tv(d.name, 20f))
-                  val infoView = tv("")
+                  col.addView(btn("← Zurueck") { showMain() }, lp(-1, dp(52)))
+                  col.addView(tv(d.name, 20f, cText, true))
+                  val infoView = tv("", 14f, cMuted)
                   col.addView(infoView)
                   val setInfo: (String) -> Unit = { s -> runOnUiThread { infoView.text = s } }
 
@@ -704,15 +830,19 @@ jobs:
                       val mac = EditText(this).apply {
                           hint = "MAC-Adresse des TVs (zum Einschalten)"
                           setText(prefs.getString("mac_${d.ip}", ""))
+                          setTextColor(cText)
+                          setHintTextColor(cMuted)
+                          background = shape(0xFF1C2028.toInt(), 14)
+                          setPadding(dp(16), dp(14), dp(16), dp(14))
                       }
-                      col.addView(mac)
+                      col.addView(mac, lp(-1, -2))
                       col.addView(btn("Einschalten (Wake-on-LAN)") {
                           prefs.edit().putString("mac_${d.ip}", mac.text.toString()).apply()
                           Thread {
                               val ok = try { wakeOnLan(mac.text.toString()) } catch (_: Exception) { false }
                               setInfo(if (ok) "Magic Packet gesendet" else "MAC-Adresse ungueltig")
                           }.start()
-                      })
+                      }, lp(-1, dp(56)))
                       if (d.kind == Kind.SAMSUNG && mac.text.isNullOrEmpty()) Thread {
                           try {
                               OkHttpClient.Builder().connectTimeout(2, TimeUnit.SECONDS).build()
@@ -723,7 +853,7 @@ jobs:
                           } catch (_: Exception) {}
                       }.start()
                   }
-                  setContentView(ScrollView(this).apply { addView(col) })
+                  setContentView(ScrollView(this).apply { setBackgroundColor(cBg); addView(col) })
               }
 
               private fun remotePad(p: (Key) -> Unit): LinearLayout {
@@ -731,12 +861,15 @@ jobs:
                   fun row(vararg items: Pair<String, Key?>) {
                       val r = LinearLayout(this)
                       items.forEach { (t, k) ->
-                          val v: View = if (k == null) View(this) else btn(t) { p(k) }
-                          r.addView(v, LinearLayout.LayoutParams(0, dp(64), 1f))
+                          val v: View = if (k == null) View(this) else {
+                              val col = when (k) { Key.POWER -> cRed; Key.OK -> cAccent; else -> cBtn }
+                              btn(t, col) { p(k) }
+                          }
+                          r.addView(v, lp(0, dp(60), 1f))
                       }
                       c.addView(r)
                   }
-                  row("⏻ Power" to Key.POWER)
+                  row("Power" to Key.POWER)
                   row("Vol +" to Key.VOL_UP, "Mute" to Key.MUTE, "CH +" to Key.CH_UP)
                   row("Vol −" to Key.VOL_DOWN, "" to null, "CH −" to Key.CH_DOWN)
                   row("" to null, "▲" to Key.UP, "" to null)

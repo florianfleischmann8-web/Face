@@ -433,8 +433,20 @@ jobs:
                   private val DESC = intArrayOf(
                       0x05, 0x0C, 0x09, 0x01, 0xA1, 0x01, 0x85, 0x01,
                       0x15, 0x00, 0x26, 0xFF, 0x03, 0x19, 0x00, 0x2A, 0xFF, 0x03,
-                      0x75, 0x10, 0x95, 0x01, 0x81, 0x00, 0xC0
+                      0x75, 0x10, 0x95, 0x01, 0x81, 0x00, 0xC0,
+                      0x05, 0x01, 0x09, 0x06, 0xA1, 0x01, 0x85, 0x02,
+                      0x05, 0x07, 0x19, 0xE0, 0x29, 0xE7, 0x15, 0x00, 0x25, 0x01,
+                      0x75, 0x01, 0x95, 0x08, 0x81, 0x02,
+                      0x95, 0x01, 0x75, 0x08, 0x81, 0x01,
+                      0x95, 0x06, 0x75, 0x08, 0x15, 0x00, 0x25, 0x65,
+                      0x05, 0x07, 0x19, 0x00, 0x29, 0x65, 0x81, 0x00, 0xC0
                   ).map { it.toByte() }.toByteArray()
+
+                  fun kbUsage(k: Key): Int = when (k) {
+                      Key.UP -> 0x52; Key.DOWN -> 0x51; Key.LEFT -> 0x50; Key.RIGHT -> 0x4F
+                      Key.OK -> 0x28; Key.BACK -> 0x29
+                      else -> 0
+                  }
 
                   fun usage(k: Key): Int = when (k) {
                       Key.POWER -> 0x30; Key.VOL_UP -> 0xE9; Key.VOL_DOWN -> 0xEA; Key.MUTE -> 0xE2
@@ -481,6 +493,12 @@ jobs:
               fun press(k: Key) {
                   val h = hid ?: return
                   val d = host ?: return
+                  val kb = kbUsage(k)
+                  if (kb != 0) {
+                      h.sendReport(d, 2, byteArrayOf(0, 0, kb.toByte(), 0, 0, 0, 0, 0))
+                      h.sendReport(d, 2, ByteArray(8))
+                      return
+                  }
                   val u = usage(k)
                   h.sendReport(d, 1, byteArrayOf((u and 0xFF).toByte(), (u shr 8).toByte()))
                   h.sendReport(d, 1, byteArrayOf(0, 0))
@@ -800,7 +818,7 @@ jobs:
                       setBackgroundColor(cBg)
                       setPadding(dp(16), dp(40), dp(16), dp(24))
                   }
-                  col.addView(btn("← Zurueck") { showMain() }, lp(-1, dp(52)))
+                  col.addView(btn("← Geraeteliste") { showMain() }, lp(-1, dp(52)))
                   col.addView(tv(d.name, 20f, cText, true))
                   val infoView = tv("", 14f, cMuted)
                   col.addView(infoView)
@@ -856,29 +874,70 @@ jobs:
                   setContentView(ScrollView(this).apply { setBackgroundColor(cBg); addView(col) })
               }
 
+              private fun flat(text: String, size: Float = 18f, oval: Boolean = false, color: Int? = null, onClick: () -> Unit): TextView =
+                  TextView(this).apply {
+                      this.text = text; textSize = size; setTextColor(cText)
+                      setTypeface(typeface, Typeface.BOLD)
+                      gravity = Gravity.CENTER
+                      fun mk(c: Int) = GradientDrawable().apply {
+                          setColor(c)
+                          if (oval) setShape(GradientDrawable.OVAL) else setCornerRadius(dp(26).toFloat())
+                      }
+                      background = RippleDrawable(ColorStateList.valueOf(0x44FFFFFF), color?.let { mk(it) }, mk(0xFFFFFFFF.toInt()))
+                      isClickable = true
+                      setOnClickListener { it.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP); onClick() }
+                  }
+
               private fun remotePad(p: (Key) -> Unit): LinearLayout {
                   val c = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-                  fun row(vararg items: Pair<String, Key?>) {
-                      val r = LinearLayout(this)
-                      items.forEach { (t, k) ->
-                          val v: View = if (k == null) View(this) else {
-                              val col = when (k) { Key.POWER -> cRed; Key.OK -> cAccent; else -> cBtn }
-                              btn(t, col) { p(k) }
-                          }
-                          r.addView(v, lp(0, dp(60), 1f))
-                      }
-                      c.addView(r)
+
+                  // Power / Mute / Menue
+                  val top = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+                  top.addView(flat("Power", 13f, true, cRed) { p(Key.POWER) }, lp(dp(68), dp(68)))
+                  top.addView(flat("Mute", 16f, false, cBtn) { p(Key.MUTE) }, lp(0, dp(68), 1f))
+                  top.addView(flat("Menue", 16f, false, cBtn) { p(Key.MENU) }, lp(0, dp(68), 1f))
+                  c.addView(top)
+
+                  // Lautstaerke- und Programm-Wippe, in der Mitte Home und Play
+                  fun rocker(label: String, up: Key, down: Key, plus: String, minus: String): LinearLayout {
+                      val r = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; background = shape(cBtn, 32) }
+                      r.addView(flat(plus, 28f) { p(up) }, LinearLayout.LayoutParams(-1, 0, 1f))
+                      r.addView(TextView(this).apply { text = label; setTextColor(cMuted); textSize = 13f; gravity = Gravity.CENTER },
+                          LinearLayout.LayoutParams(-1, -2))
+                      r.addView(flat(minus, 28f) { p(down) }, LinearLayout.LayoutParams(-1, 0, 1f))
+                      return r
                   }
-                  row("Power" to Key.POWER)
-                  row("Vol +" to Key.VOL_UP, "Mute" to Key.MUTE, "CH +" to Key.CH_UP)
-                  row("Vol −" to Key.VOL_DOWN, "" to null, "CH −" to Key.CH_DOWN)
-                  row("" to null, "▲" to Key.UP, "" to null)
-                  row("◀" to Key.LEFT, "OK" to Key.OK, "▶" to Key.RIGHT)
-                  row("" to null, "▼" to Key.DOWN, "" to null)
-                  row("Zurueck" to Key.BACK, "Home" to Key.HOME, "Menue" to Key.MENU)
-                  row("⏯" to Key.PLAY)
+                  val mid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+                  mid.addView(flat("Home", 16f, false, cBtn) { p(Key.HOME) }, lp(-1, 0, 1f))
+                  mid.addView(flat("⏯", 22f, false, cBtn) { p(Key.PLAY) }, lp(-1, 0, 1f))
+                  val mix = LinearLayout(this)
+                  mix.addView(rocker("Vol", Key.VOL_UP, Key.VOL_DOWN, "+", "−"), lp(0, dp(190), 1f))
+                  mix.addView(mid, LinearLayout.LayoutParams(0, dp(190), 1f))
+                  mix.addView(rocker("CH", Key.CH_UP, Key.CH_DOWN, "+", "−"), lp(0, dp(190), 1f))
+                  c.addView(mix)
+
+                  // Steuerkreuz
+                  val pad = FrameLayout(this).apply {
+                      background = GradientDrawable().apply { setShape(GradientDrawable.OVAL); setColor(cBtn) }
+                  }
+                  fun arrow(t: String, g: Int, k: Key) {
+                      val lpa = FrameLayout.LayoutParams(dp(84), dp(84), g).apply { setMargins(dp(8), dp(8), dp(8), dp(8)) }
+                      pad.addView(flat(t, 26f, true) { p(k) }, lpa)
+                  }
+                  arrow("▲", Gravity.TOP or Gravity.CENTER_HORIZONTAL, Key.UP)
+                  arrow("▼", Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL, Key.DOWN)
+                  arrow("◀", Gravity.START or Gravity.CENTER_VERTICAL, Key.LEFT)
+                  arrow("▶", Gravity.END or Gravity.CENTER_VERTICAL, Key.RIGHT)
+                  pad.addView(flat("OK", 22f, true, cAccent) { p(Key.OK) }, FrameLayout.LayoutParams(dp(104), dp(104), Gravity.CENTER))
+                  c.addView(pad, LinearLayout.LayoutParams(dp(290), dp(290)).apply {
+                      gravity = Gravity.CENTER_HORIZONTAL; setMargins(0, dp(14), 0, dp(14))
+                  })
+
+                  // Zurueck
+                  c.addView(flat("Zurueck", 17f, false, cBtn) { p(Key.BACK) }, lp(-1, dp(60)))
                   return c
               }
+
           }
           EOF_7
       - uses: gradle/actions/setup-gradle@v4

@@ -18,7 +18,8 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - uses: android-actions/setup-android@v3
+      - name: Android-Lizenzen akzeptieren
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
 
       - uses: gradle/actions/setup-gradle@v3
         with:
@@ -85,7 +86,7 @@ jobs:
               <application
                   android:label="Hausi"
                   android:usesCleartextTraffic="true"
-                  android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar">
+                  android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
                   <activity
                       android:name=".MainActivity"
                       android:exported="true"
@@ -102,15 +103,25 @@ jobs:
           cat > app/src/main/java/com/hausi/helper/MainActivity.java <<'EOF'
           package com.hausi.helper;
 
+          import android.animation.ObjectAnimator;
+          import android.animation.ValueAnimator;
           import android.app.Activity;
+          import android.content.SharedPreferences;
+          import android.graphics.Color;
+          import android.graphics.Typeface;
+          import android.graphics.drawable.GradientDrawable;
           import android.os.Bundle;
+          import android.text.InputType;
           import android.view.Gravity;
-          import android.widget.Button;
+          import android.view.View;
+          import android.view.ViewGroup;
           import android.widget.EditText;
+          import android.widget.FrameLayout;
           import android.widget.LinearLayout;
           import android.widget.ScrollView;
           import android.widget.TextView;
 
+          import org.json.JSONArray;
           import org.json.JSONObject;
 
           import java.io.BufferedReader;
@@ -120,8 +131,10 @@ jobs:
           import java.net.HttpURLConnection;
           import java.net.URL;
           import java.nio.charset.StandardCharsets;
+          import java.util.ArrayList;
           import java.util.HashMap;
           import java.util.LinkedHashSet;
+          import java.util.List;
           import java.util.Locale;
           import java.util.Map;
 
@@ -216,7 +229,7 @@ jobs:
 
               static final String[] SUFFIXE = {"en", "er", "es", "em", "e", "n", "s", "t", "st"};
 
-              /** Sucht ein Wort im Wortschatz, auch mit einfachen Endungen (Haus / Häuser-Näherung). */
+              /** Sucht ein Wort im Wortschatz, auch mit einfachen Endungen. */
               static String lookup(Map<String, String> map, String key) {
                   String r = map.get(key);
                   if (r != null) return r;
@@ -230,6 +243,71 @@ jobs:
                       }
                   }
                   return null;
+              }
+
+              static String join(List<String> l, int max) {
+                  StringBuilder sb = new StringBuilder();
+                  for (int i = 0; i < l.size() && i < max; i++) {
+                      if (i > 0) sb.append(", ");
+                      sb.append(l.get(i));
+                  }
+                  if (l.size() > max) sb.append(" …");
+                  return sb.toString();
+              }
+
+              // ----------------- Wort-Erkennung -----------------
+              static class Analyse {
+                  String fach = "Allgemein";
+                  String hinweis = "Beantworte die Aufgabe verständlich und Schritt für Schritt.";
+                  List<String> bekannt = new ArrayList<>();
+                  List<String> unbekannt = new ArrayList<>();
+
+                  String bericht() {
+                      String r = "Fach: " + fach;
+                      if (!bekannt.isEmpty()) r += "  ·  erkannt: " + join(bekannt, 8);
+                      if (!unbekannt.isEmpty()) r += "\nunbekannt: " + join(unbekannt, 8);
+                      return r;
+                  }
+              }
+
+              static Analyse analysiere(String text) {
+                  Analyse a = new Analyse();
+                  Map<String, Integer> punkte = new HashMap<>();
+                  LinkedHashSet<String> bekannt = new LinkedHashSet<>();
+                  LinkedHashSet<String> unbekannt = new LinkedHashSet<>();
+                  String hinweis = null;
+
+                  for (String t : text.split("[^\\p{L}\\p{N}ß]+")) {
+                      if (t.isEmpty() || t.matches("\\d+")) continue;
+                      String key = t.toLowerCase(Locale.GERMAN);
+                      String fach = lookup(LEX, key);
+                      String aufgabe = lookup(TASK, key);
+                      if (fach != null) {
+                          bekannt.add(t);
+                          Integer alt = punkte.get(fach);
+                          punkte.put(fach, alt == null ? 1 : alt + 1);
+                      }
+                      if (aufgabe != null) {
+                          bekannt.add(t);
+                          if (hinweis == null) hinweis = aufgabe;
+                      }
+                      if (fach == null && aufgabe == null) unbekannt.add(t);
+                  }
+                  if (text.matches("(?s).*\\d.*[+\\-*/^=].*")) {
+                      Integer alt = punkte.get("Mathe");
+                      punkte.put("Mathe", alt == null ? 1 : alt + 1);
+                  }
+                  int max = 0;
+                  for (Map.Entry<String, Integer> e : punkte.entrySet()) {
+                      if (e.getValue() > max) {
+                          max = e.getValue();
+                          a.fach = e.getKey();
+                      }
+                  }
+                  if (hinweis != null) a.hinweis = hinweis;
+                  a.bekannt.addAll(bekannt);
+                  a.unbekannt.addAll(unbekannt);
+                  return a;
               }
 
               // ----------------- Mini-Taschenrechner (offline) -----------------
@@ -310,158 +388,334 @@ jobs:
                   }
               }
 
-              // ----------------- Oberfläche -----------------
-              EditText urlIn, modelIn, taskIn;
-              TextView analysisOut, answerOut;
-              Button goBtn;
+              // =====================================================
+              //  OBERFLÄCHE: Liquid-Glass-Chat
+              // =====================================================
+              LinearLayout chat, settingsPanel;
+              ScrollView scroll;
+              EditText input, urlIn, modelIn;
+              TextView sendBtn;
+              SharedPreferences prefs;
+              JSONArray history = new JSONArray();
+              boolean busy = false;
 
-              int dp(int v) { return (int) (v * getResources().getDisplayMetrics().density); }
+              int dp(float v) {
+                  return (int) (v * getResources().getDisplayMetrics().density + 0.5f);
+              }
 
-              EditText field(String hint, String value) {
-                  EditText e = new EditText(this);
-                  e.setHint(hint);
-                  e.setText(value);
-                  e.setSingleLine(true);
-                  return e;
+              /** Glas-Hintergrund: leichter Farbverlauf + heller Rand wie bei Liquid Glass. */
+              GradientDrawable glass(int c1, int c2, float tl, float tr, float br, float bl, int stroke) {
+                  GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{c1, c2});
+                  g.setCornerRadii(new float[]{dp(tl), dp(tl), dp(tr), dp(tr), dp(br), dp(br), dp(bl), dp(bl)});
+                  g.setStroke(dp(1), stroke);
+                  return g;
+              }
+
+              View blob(int color, int gravity, int mx, int my) {
+                  View v = new View(this);
+                  GradientDrawable g = new GradientDrawable();
+                  g.setGradientType(GradientDrawable.RADIAL_GRADIENT);
+                  g.setGradientRadius(dp(170));
+                  g.setColors(new int[]{color, color & 0x00FFFFFF});
+                  v.setBackground(g);
+                  FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(340), dp(340), gravity);
+                  lp.setMargins(dp(mx), dp(my), dp(mx), dp(my));
+                  v.setLayoutParams(lp);
+                  return v;
+              }
+
+              TextView pill(String text, float size) {
+                  TextView t = new TextView(this);
+                  t.setText(text);
+                  t.setTextSize(size);
+                  t.setTextColor(Color.WHITE);
+                  t.setGravity(Gravity.CENTER);
+                  t.setPadding(dp(14), dp(8), dp(14), dp(8));
+                  t.setBackground(glass(0x44FFFFFF, 0x1AFFFFFF, 20, 20, 20, 20, 0x66FFFFFF));
+                  return t;
               }
 
               @Override
               protected void onCreate(Bundle b) {
                   super.onCreate(b);
-                  ScrollView sv = new ScrollView(this);
-                  LinearLayout root = new LinearLayout(this);
-                  root.setOrientation(LinearLayout.VERTICAL);
-                  root.setPadding(dp(16), dp(40), dp(16), dp(24));
-                  sv.addView(root);
+                  prefs = getSharedPreferences("hausi", MODE_PRIVATE);
+                  getWindow().setStatusBarColor(0xFF0B1020);
+                  getWindow().setNavigationBarColor(0xFF0C2B4A);
 
+                  FrameLayout root = new FrameLayout(this);
+                  root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                          new int[]{0xFF0B1020, 0xFF1B1347, 0xFF0C2B4A}));
+                  root.addView(blob(0x99FF4FA3, Gravity.TOP | Gravity.START, -110, 40));
+                  root.addView(blob(0x8838D6FF, Gravity.CENTER_VERTICAL | Gravity.END, -140, 0));
+                  root.addView(blob(0x887B5CFF, Gravity.BOTTOM | Gravity.START, -100, 60));
+
+                  LinearLayout col = new LinearLayout(this);
+                  col.setOrientation(LinearLayout.VERTICAL);
+                  root.addView(col, new FrameLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+                  // ---- Kopfzeile ----
+                  LinearLayout header = new LinearLayout(this);
+                  header.setOrientation(LinearLayout.HORIZONTAL);
+                  header.setGravity(Gravity.CENTER_VERTICAL);
+                  header.setPadding(dp(18), dp(12), dp(12), dp(12));
+                  header.setBackground(glass(0x40FFFFFF, 0x14FFFFFF, 26, 26, 26, 26, 0x66FFFFFF));
+
+                  LinearLayout titles = new LinearLayout(this);
+                  titles.setOrientation(LinearLayout.VERTICAL);
                   TextView title = new TextView(this);
-                  title.setText("Hausi – Hausaufgabenhelfer");
+                  title.setText("Hausi");
+                  title.setTextColor(Color.WHITE);
                   title.setTextSize(22);
-                  root.addView(title);
+                  title.setTypeface(Typeface.DEFAULT_BOLD);
+                  TextView sub = new TextView(this);
+                  sub.setText("Hausaufgabenhelfer · Ollama");
+                  sub.setTextColor(0xB3FFFFFF);
+                  sub.setTextSize(12);
+                  titles.addView(title);
+                  titles.addView(sub);
+                  header.addView(titles, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-                  urlIn = field("Ollama-Adresse", "http://127.0.0.1:11434");
-                  modelIn = field("Modell", "llama3.2:1b");
-                  root.addView(urlIn);
-                  root.addView(modelIn);
+                  TextView gear = pill("⚙", 18);
+                  gear.setOnClickListener(v -> settingsPanel.setVisibility(
+                          settingsPanel.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE));
+                  header.addView(gear);
 
-                  taskIn = new EditText(this);
-                  taskIn.setHint("Aufgabe hier eintippen …");
-                  taskIn.setMinLines(5);
-                  taskIn.setGravity(Gravity.TOP);
-                  root.addView(taskIn);
+                  LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                  hlp.setMargins(dp(12), dp(10), dp(12), dp(4));
+                  col.addView(header, hlp);
 
-                  goBtn = new Button(this);
-                  goBtn.setText("Lösen");
-                  goBtn.setOnClickListener(v -> loesen());
-                  root.addView(goBtn);
+                  // ---- Einstellungen (ausklappbar) ----
+                  settingsPanel = new LinearLayout(this);
+                  settingsPanel.setOrientation(LinearLayout.VERTICAL);
+                  settingsPanel.setPadding(dp(16), dp(10), dp(16), dp(12));
+                  settingsPanel.setBackground(glass(0x33FFFFFF, 0x10FFFFFF, 22, 22, 22, 22, 0x55FFFFFF));
+                  settingsPanel.setVisibility(View.GONE);
 
-                  analysisOut = new TextView(this);
-                  analysisOut.setTextSize(13);
-                  analysisOut.setPadding(0, dp(12), 0, dp(8));
-                  analysisOut.setTextIsSelectable(true);
-                  root.addView(analysisOut);
+                  urlIn = settingField("Ollama-Adresse", prefs.getString("url", "http://127.0.0.1:11434"));
+                  modelIn = settingField("Modell", prefs.getString("model", "llama3.2:1b"));
+                  settingsPanel.addView(urlIn);
+                  settingsPanel.addView(modelIn);
+                  TextView clear = pill("Chat leeren", 14);
+                  clear.setOnClickListener(v -> {
+                      history = new JSONArray();
+                      chat.removeAllViews();
+                      willkommen();
+                      settingsPanel.setVisibility(View.GONE);
+                  });
+                  LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                  clp.topMargin = dp(8);
+                  settingsPanel.addView(clear, clp);
 
-                  answerOut = new TextView(this);
-                  answerOut.setTextSize(16);
-                  answerOut.setTextIsSelectable(true);
-                  root.addView(answerOut);
+                  LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                  slp.setMargins(dp(12), dp(4), dp(12), dp(4));
+                  col.addView(settingsPanel, slp);
 
-                  setContentView(sv);
+                  // ---- Chatverlauf ----
+                  scroll = new ScrollView(this);
+                  scroll.setVerticalScrollBarEnabled(false);
+                  chat = new LinearLayout(this);
+                  chat.setOrientation(LinearLayout.VERTICAL);
+                  chat.setPadding(dp(12), dp(8), dp(12), dp(8));
+                  scroll.addView(chat, new ViewGroup.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+                  scroll.addOnLayoutChangeListener((v, l, t, r, bt, ol, ot, or2, ob) -> {
+                      if (bt - t < ob - ot) scrollDown();
+                  });
+                  col.addView(scroll, new LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
+                  // ---- Eingabeleiste ----
+                  LinearLayout bar = new LinearLayout(this);
+                  bar.setOrientation(LinearLayout.HORIZONTAL);
+                  bar.setGravity(Gravity.CENTER_VERTICAL);
+                  bar.setPadding(dp(16), dp(6), dp(8), dp(6));
+                  bar.setBackground(glass(0x44FFFFFF, 0x16FFFFFF, 28, 28, 28, 28, 0x77FFFFFF));
+
+                  input = new EditText(this);
+                  input.setHint("Aufgabe eintippen …");
+                  input.setHintTextColor(0x99FFFFFF);
+                  input.setTextColor(Color.WHITE);
+                  input.setTextSize(16);
+                  input.setBackground(null);
+                  input.setMaxLines(5);
+                  input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                          | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+                  bar.addView(input, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+                  sendBtn = new TextView(this);
+                  sendBtn.setText("➤");
+                  sendBtn.setTextSize(18);
+                  sendBtn.setTextColor(Color.WHITE);
+                  sendBtn.setGravity(Gravity.CENTER);
+                  GradientDrawable sg = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                          new int[]{0xFF6AA8FF, 0xFF7B5CFF});
+                  sg.setShape(GradientDrawable.OVAL);
+                  sg.setStroke(dp(1), 0x99FFFFFF);
+                  sendBtn.setBackground(sg);
+                  sendBtn.setOnClickListener(v -> senden());
+                  bar.addView(sendBtn, new LinearLayout.LayoutParams(dp(46), dp(46)));
+
+                  LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                  blp.setMargins(dp(12), dp(4), dp(12), dp(12));
+                  col.addView(bar, blp);
+
+                  setContentView(root);
+                  willkommen();
               }
 
-              // ----------------- Wort-Erkennung -----------------
-              void loesen() {
-                  final String text = taskIn.getText().toString().trim();
-                  if (text.isEmpty()) {
-                      answerOut.setText("Bitte erst eine Aufgabe eingeben.");
-                      return;
-                  }
+              EditText settingField(String hint, String value) {
+                  EditText e = new EditText(this);
+                  e.setHint(hint);
+                  e.setText(value);
+                  e.setSingleLine(true);
+                  e.setTextColor(Color.WHITE);
+                  e.setHintTextColor(0x99FFFFFF);
+                  e.setTextSize(15);
+                  return e;
+              }
 
-                  Map<String, Integer> punkte = new HashMap<>();
-                  LinkedHashSet<String> bekannt = new LinkedHashSet<>();
-                  LinkedHashSet<String> unbekannt = new LinkedHashSet<>();
-                  String hinweis = null;
+              void willkommen() {
+                  addBubble("Hallo! 👋 Ich bin Hausi. Schreib mir deine Aufgabe – ich erkenne das Fach und "
+                          + "löse sie mit Ollama. Rechenaufgaben wie (3+4)*2 rechne ich sofort offline.", 0);
+              }
 
-                  for (String t : text.split("[^\\p{L}\\p{N}ß]+")) {
-                      if (t.isEmpty() || t.matches("\\d+")) continue;
-                      String key = t.toLowerCase(Locale.GERMAN);
-                      String fach = lookup(LEX, key);
-                      String aufgabe = lookup(TASK, key);
-                      if (fach != null) {
-                          bekannt.add(t);
-                          Integer alt = punkte.get(fach);
-                          punkte.put(fach, alt == null ? 1 : alt + 1);
-                      }
-                      if (aufgabe != null) {
-                          bekannt.add(t);
-                          if (hinweis == null) hinweis = aufgabe;
-                      }
-                      if (fach == null && aufgabe == null) unbekannt.add(t);
-                  }
-                  if (text.matches(".*\\d.*[+\\-*/^=].*")) {
-                      Integer alt = punkte.get("Mathe");
-                      punkte.put("Mathe", alt == null ? 1 : alt + 1);
-                  }
+              void scrollDown() {
+                  scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
+              }
 
-                  String fach = "Allgemein";
-                  int max = 0;
-                  for (Map.Entry<String, Integer> e : punkte.entrySet()) {
-                      if (e.getValue() > max) { max = e.getValue(); fach = e.getKey(); }
-                  }
-                  if (hinweis == null) hinweis = "Beantworte die Aufgabe verständlich und Schritt für Schritt.";
+              /** kind: 0 = Hausi, 1 = ich, 2 = Analyse-Chip */
+              TextView addBubble(String text, int kind) {
+                  TextView tv = new TextView(this);
+                  tv.setText(text);
+                  tv.setTextColor(kind == 2 ? 0xD9FFFFFF : Color.WHITE);
+                  tv.setTextSize(kind == 2 ? 12 : 16);
+                  tv.setLineSpacing(0, 1.12f);
+                  tv.setTextIsSelectable(true);
+                  tv.setMaxWidth((int) (getResources().getDisplayMetrics().widthPixels * 0.82f));
+                  tv.setPadding(dp(15), dp(10), dp(15), dp(10));
 
-                  analysisOut.setText("Fach erkannt: " + fach
-                          + "\nErkannte Wörter: " + (bekannt.isEmpty() ? "–" : String.join(", ", bekannt))
-                          + "\nUnbekannte Wörter: " + (unbekannt.isEmpty() ? "–" : String.join(", ", unbekannt)));
+                  LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                          ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                  lp.setMargins(0, dp(4), 0, dp(4));
+
+                  if (kind == 1) {
+                      tv.setBackground(glass(0xAA6AA8FF, 0x777B5CFF, 22, 22, 6, 22, 0x99FFFFFF));
+                      lp.gravity = Gravity.END;
+                  } else if (kind == 2) {
+                      tv.setBackground(glass(0x28FFFFFF, 0x0DFFFFFF, 14, 14, 14, 14, 0x44FFFFFF));
+                      lp.gravity = Gravity.END;
+                  } else {
+                      tv.setBackground(glass(0x48FFFFFF, 0x18FFFFFF, 22, 22, 22, 6, 0x77FFFFFF));
+                      lp.gravity = Gravity.START;
+                  }
+                  chat.addView(tv, lp);
+
+                  tv.setAlpha(0f);
+                  tv.setTranslationY(dp(14));
+                  tv.animate().alpha(1f).translationY(0f).setDuration(260).start();
+                  scrollDown();
+                  return tv;
+              }
+
+              JSONObject msg(String role, String content) {
+                  JSONObject o = new JSONObject();
+                  try {
+                      o.put("role", role);
+                      o.put("content", content);
+                  } catch (Exception ignored) {
+                  }
+                  return o;
+              }
+
+              // ----------------- Senden -----------------
+              void senden() {
+                  if (busy) return;
+                  final String text = input.getText().toString().trim();
+                  if (text.isEmpty()) return;
+                  input.setText("");
+
+                  addBubble(text, 1);
+                  final Analyse a = analysiere(text);
+                  addBubble(a.bericht(), 2);
 
                   // Reine Rechenaufgabe? Dann sofort offline lösen.
                   String lokal = versucheRechnen(text);
                   if (lokal != null) {
-                      answerOut.setText("Ergebnis (offline berechnet): " + lokal);
+                      addBubble("= " + lokal + "\n(offline berechnet)", 0);
                       return;
                   }
 
-                  final String prompt = "Du bist ein freundlicher Hausaufgabenhelfer für Schüler.\n"
-                          + "Fach: " + fach + "\n"
-                          + "Anweisung: " + hinweis + "\n"
-                          + (bekannt.isEmpty() ? "" : "Wichtige Schlüsselwörter: " + String.join(", ", bekannt) + "\n")
-                          + "Antworte immer auf Deutsch, klar und nicht zu lang.\n\n"
-                          + "Aufgabe:\n" + text;
-
                   final String basis = urlIn.getText().toString().trim().replaceAll("/+$", "");
                   final String modell = modelIn.getText().toString().trim();
+                  prefs.edit().putString("url", basis).putString("model", modell).apply();
 
-                  goBtn.setEnabled(false);
-                  answerOut.setText("Ollama denkt nach …");
+                  final String angereichert = "Fach: " + a.fach + "\n"
+                          + "Anweisung: " + a.hinweis + "\n"
+                          + (a.bekannt.isEmpty() ? "" : "Wichtige Schlüsselwörter: " + join(a.bekannt, 12) + "\n")
+                          + "\nAufgabe:\n" + text;
+                  history.put(msg("user", angereichert));
+
+                  final JSONArray nachrichten = new JSONArray();
+                  nachrichten.put(msg("system", "Du bist Hausi, ein freundlicher Hausaufgabenhelfer für Schüler. "
+                          + "Antworte immer auf Deutsch, klar, Schritt für Schritt und nicht zu lang."));
+                  int start = Math.max(0, history.length() - 12);
+                  for (int i = start; i < history.length(); i++) nachrichten.put(history.optJSONObject(i));
+
+                  busy = true;
+                  sendBtn.setAlpha(0.5f);
+                  final TextView tippt = addBubble("Hausi denkt nach …", 0);
+                  final ObjectAnimator puls = ObjectAnimator.ofFloat(tippt, "alpha", 1f, 0.35f);
+                  puls.setDuration(700);
+                  puls.setRepeatCount(ValueAnimator.INFINITE);
+                  puls.setRepeatMode(ValueAnimator.REVERSE);
+                  puls.setStartDelay(300);
+                  puls.start();
 
                   new Thread(() -> {
-                      String ergebnis;
+                      String antwort;
+                      boolean ok = true;
                       try {
-                          ergebnis = frageOllama(basis, modell, prompt);
+                          antwort = frageOllama(basis, modell, nachrichten);
                       } catch (Exception e) {
-                          ergebnis = "Verbindung zu Ollama fehlgeschlagen.\n\n"
+                          ok = false;
+                          antwort = "Verbindung zu Ollama fehlgeschlagen.\n\n"
                                   + "Prüfe in Termux:\n"
                                   + "1) ollama serve  (muss laufen)\n"
                                   + "2) ollama pull " + modell + "\n"
-                                  + "3) Adresse hier: http://127.0.0.1:11434\n\n"
+                                  + "3) Adresse: http://127.0.0.1:11434\n\n"
                                   + "Fehler: " + e.getMessage();
                       }
-                      final String fertig = ergebnis;
+                      final String fertig = antwort;
+                      final boolean erfolg = ok;
                       runOnUiThread(() -> {
-                          answerOut.setText(fertig);
-                          goBtn.setEnabled(true);
+                          puls.cancel();
+                          tippt.setAlpha(1f);
+                          tippt.setText(fertig);
+                          if (erfolg) {
+                              history.put(msg("assistant", fertig));
+                          } else if (history.length() > 0) {
+                              history.remove(history.length() - 1);
+                          }
+                          busy = false;
+                          sendBtn.setAlpha(1f);
+                          scrollDown();
                       });
                   }).start();
               }
 
               // ----------------- Ollama-Verbindung -----------------
-              static String frageOllama(String basis, String modell, String prompt) throws Exception {
+              static String frageOllama(String basis, String modell, JSONArray nachrichten) throws Exception {
                   JSONObject body = new JSONObject();
                   body.put("model", modell);
-                  body.put("prompt", prompt);
+                  body.put("messages", nachrichten);
                   body.put("stream", false);
 
-                  HttpURLConnection c = (HttpURLConnection) new URL(basis + "/api/generate").openConnection();
+                  HttpURLConnection c = (HttpURLConnection) new URL(basis + "/api/chat").openConnection();
                   c.setRequestMethod("POST");
                   c.setConnectTimeout(8000);
                   c.setReadTimeout(300000);
@@ -479,7 +733,8 @@ jobs:
                       while ((line = r.readLine()) != null) sb.append(line);
                   }
                   if (code >= 400) throw new Exception("HTTP " + code + ": " + sb);
-                  return new JSONObject(sb.toString()).optString("response", "(keine Antwort)").trim();
+                  JSONObject antwort = new JSONObject(sb.toString());
+                  return antwort.getJSONObject("message").optString("content", "(keine Antwort)").trim();
               }
           }
           EOF

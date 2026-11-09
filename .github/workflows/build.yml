@@ -1,89 +1,95 @@
-name: Build APK
+name: Build Hausi APK
+
+# Diese Datei nach .github/workflows/build.yml in dein GitHub-Repo legen.
+# Sie erzeugt das komplette Android-Projekt selbst und baut die APK.
+
 on:
   push:
-    branches: [main]
   workflow_dispatch:
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-      - name: Projektdateien erzeugen
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.4'
+
+      - name: Projekt erzeugen
         run: |
-          mkdir -p app/src/main/java/de/fernbedienung
-          mkdir -p app/src/main/res/drawable
-          mkdir -p app/src/main/res/values
-          mkdir -p app/src/main/res/mipmap-anydpi-v26
-          cat > settings.gradle.kts <<'EOF_0'
+          mkdir -p app/src/main/java/com/hausi/helper
+
+          cat > settings.gradle <<'EOF'
           pluginManagement {
-              repositories { google(); mavenCentral(); gradlePluginPortal() }
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
           }
           dependencyResolutionManagement {
-              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
-              repositories { google(); mavenCentral() }
+              repositories {
+                  google()
+                  mavenCentral()
+              }
           }
-          rootProject.name = "Fernbedienung"
-          include(":app")
-          EOF_0
-          cat > build.gradle.kts <<'EOF_1'
+          rootProject.name = "Hausi"
+          include ':app'
+          EOF
+
+          cat > build.gradle <<'EOF'
           plugins {
-              id("com.android.application") version "8.5.2" apply false
-              id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+              id 'com.android.application' version '8.2.2' apply false
           }
-          EOF_1
-          cat > gradle.properties <<'EOF_2'
+          EOF
+
+          cat > gradle.properties <<'EOF'
           org.gradle.jvmargs=-Xmx2g
           android.useAndroidX=false
-          EOF_2
-          cat > app/build.gradle.kts <<'EOF_3'
+          EOF
+
+          cat > app/build.gradle <<'EOF'
           plugins {
-              id("com.android.application")
-              id("org.jetbrains.kotlin.android")
+              id 'com.android.application'
           }
           android {
-              namespace = "de.fernbedienung"
-              compileSdk = 34
+              namespace 'com.hausi.helper'
+              compileSdk 34
               defaultConfig {
-                  applicationId = "de.fernbedienung"
-                  minSdk = 28
-                  targetSdk = 34
-                  versionCode = 1
-                  versionName = "1.0"
+                  applicationId "com.hausi.helper"
+                  minSdk 24
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0"
               }
               compileOptions {
-                  sourceCompatibility = JavaVersion.VERSION_17
-                  targetCompatibility = JavaVersion.VERSION_17
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
               }
-              kotlinOptions { jvmTarget = "17" }
           }
-          dependencies {
-              implementation("com.squareup.okhttp3:okhttp:4.12.0")
-          }
-          EOF_3
-          cat > app/src/main/AndroidManifest.xml <<'EOF_4'
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.INTERNET" />
-              <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
-              <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
-              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-              <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-              <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
-              <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
-              <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
-              <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-
               <application
-                  android:label="Fernbedienung"
-                  android:icon="@mipmap/ic_launcher"
-                  android:roundIcon="@mipmap/ic_launcher"
+                  android:label="Hausi"
                   android:usesCleartextTraffic="true"
-                  android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
-                  <activity android:name=".MainActivity" android:exported="true">
+                  android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:windowSoftInputMode="adjustResize">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
                           <category android:name="android.intent.category.LAUNCHER" />
@@ -91,860 +97,398 @@ jobs:
                   </activity>
               </application>
           </manifest>
-          EOF_4
-          cat > app/src/main/res/values/colors.xml <<'EOF_8'
-          <?xml version="1.0" encoding="utf-8"?>
-          <resources>
-              <color name="ic_bg">#1B1F27</color>
-          </resources>
-          EOF_8
-          cat > app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml <<'EOF_9'
-          <?xml version="1.0" encoding="utf-8"?>
-          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-              <background android:drawable="@color/ic_bg" />
-              <foreground android:drawable="@drawable/ic_fg" />
-          </adaptive-icon>
-          EOF_9
-          cat > app/src/main/res/drawable/ic_fg.xml <<'EOF_10'
-          <?xml version="1.0" encoding="utf-8"?>
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="108dp"
-              android:height="108dp"
-              android:viewportWidth="108"
-              android:viewportHeight="108">
-              <path
-                  android:fillColor="#FFFFFF"
-                  android:pathData="M40,24h28a6,6 0 0 1 6,6v48a6,6 0 0 1 -6,6h-28a6,6 0 0 1 -6,-6v-48a6,6 0 0 1 6,-6z" />
-              <path
-                  android:fillColor="#E5484D"
-                  android:pathData="M54,30m-4,0a4,4 0 1,1 8,0a4,4 0 1,1 -8,0" />
-              <path
-                  android:fillColor="#3D7BFF"
-                  android:pathData="M54,50m-9,0a9,9 0 1,1 18,0a9,9 0 1,1 -18,0" />
-              <path
-                  android:fillColor="#C5CAD3"
-                  android:pathData="M42,64h8v5h-8z M58,64h8v5h-8z M42,72h8v5h-8z M58,72h8v5h-8z" />
-          </vector>
-          EOF_10
-          cat > app/src/main/java/de/fernbedienung/Remotes.kt <<'EOF_5'
-          package de.fernbedienung
+          EOF
 
-          import android.annotation.SuppressLint
-          import android.content.SharedPreferences
-          import android.util.Base64
-          import okhttp3.*
-          import okhttp3.RequestBody.Companion.toRequestBody
-          import org.json.JSONArray
-          import org.json.JSONObject
-          import java.io.IOException
-          import java.net.DatagramPacket
-          import java.net.DatagramSocket
-          import java.net.InetAddress
-          import java.security.SecureRandom
-          import java.security.cert.X509Certificate
-          import java.util.concurrent.TimeUnit
-          import javax.net.ssl.SSLContext
-          import javax.net.ssl.X509TrustManager
+          cat > app/src/main/java/com/hausi/helper/MainActivity.java <<'EOF'
+          package com.hausi.helper;
 
-          enum class Key { POWER, VOL_UP, VOL_DOWN, MUTE, CH_UP, CH_DOWN, UP, DOWN, LEFT, RIGHT, OK, BACK, HOME, MENU, PLAY }
+          import android.app.Activity;
+          import android.os.Bundle;
+          import android.view.Gravity;
+          import android.widget.Button;
+          import android.widget.EditText;
+          import android.widget.LinearLayout;
+          import android.widget.ScrollView;
+          import android.widget.TextView;
 
-          interface NetRemote {
-              fun send(key: Key)
-              fun close()
-          }
+          import org.json.JSONObject;
 
-          /** TVs nutzen im LAN selbstsignierte Zertifikate, daher wird hier nicht geprueft (nur lokale Geraete!). */
-          @SuppressLint("CustomX509TrustManager", "TrustAllX509TrustManager")
-          fun unsafeClient(pingSeconds: Long = 20): OkHttpClient {
-              val tm = object : X509TrustManager {
-                  override fun checkClientTrusted(c: Array<X509Certificate>, a: String) {}
-                  override fun checkServerTrusted(c: Array<X509Certificate>, a: String) {}
-                  override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
-              }
-              val ctx = SSLContext.getInstance("TLS")
-              ctx.init(null, arrayOf(tm), SecureRandom())
-              return OkHttpClient.Builder()
-                  .sslSocketFactory(ctx.socketFactory, tm)
-                  .hostnameVerifier { _, _ -> true }
-                  .connectTimeout(4, TimeUnit.SECONDS)
-                  .readTimeout(0, TimeUnit.SECONDS)
-                  .pingInterval(pingSeconds, TimeUnit.SECONDS)
-                  .build()
-          }
+          import java.io.BufferedReader;
+          import java.io.InputStream;
+          import java.io.InputStreamReader;
+          import java.io.OutputStream;
+          import java.net.HttpURLConnection;
+          import java.net.URL;
+          import java.nio.charset.StandardCharsets;
+          import java.util.HashMap;
+          import java.util.LinkedHashSet;
+          import java.util.Locale;
+          import java.util.Map;
 
-          /** Magic Packet. Muss ausserhalb des Main-Threads laufen. */
-          fun wakeOnLan(mac: String): Boolean {
-              val hex = mac.replace(Regex("[^0-9A-Fa-f]"), "")
-              if (hex.length != 12) return false
-              val m = ByteArray(6) { hex.substring(it * 2, it * 2 + 2).toInt(16).toByte() }
-              val data = ByteArray(6) { 0xFF.toByte() } + ByteArray(96) { m[it % 6] }
-              DatagramSocket().use { s ->
-                  s.broadcast = true
-                  s.send(DatagramPacket(data, data.size, InetAddress.getByName("255.255.255.255"), 9))
-              }
-              return true
-          }
+          public class MainActivity extends Activity {
 
-          // ---------------------------------------------------------------- Samsung (Tizen)
-          class SamsungRemote(
-              private val ip: String,
-              private val prefs: SharedPreferences,
-              private val info: (String) -> Unit
-          ) : NetRemote {
-              private val client = unsafeClient()
-              private var ws: WebSocket? = null
-              @Volatile private var ready = false
-              private val pending = ArrayList<String>()
-              private val name = Base64.encodeToString("Handy".toByteArray(), Base64.NO_WRAP)
+              // =====================================================
+              //  WORTSCHATZ: Hier trägst du deutsche Wörter ein.
+              //  add("Fach", "wort1 wort2 wort3 ...");
+              //  Einfach beliebig viele Zeilen ergänzen!
+              // =====================================================
+              static final Map<String, String> LEX = new HashMap<>();
+              static final Map<String, String> TASK = new HashMap<>();
 
-              init { connect(true) }
-
-              private fun connect(secure: Boolean) {
-                  val token = prefs.getString("sam_$ip", null)
-                  val base = "/api/v2/channels/samsung.remote.control?name=$name"
-                  val url = if (secure) "wss://$ip:8002$base" + (token?.let { "&token=$it" } ?: "")
-                            else "ws://$ip:8001$base"
-                  ws = client.newWebSocket(Request.Builder().url(url).build(), object : WebSocketListener() {
-                      override fun onMessage(webSocket: WebSocket, text: String) {
-                          try {
-                              val j = JSONObject(text)
-                              when (j.optString("event")) {
-                                  "ms.channel.connect" -> {
-                                      j.optJSONObject("data")?.optString("token")?.takeIf { it.isNotEmpty() }
-                                          ?.let { prefs.edit().putString("sam_$ip", it).apply() }
-                                      ready = true
-                                      info("Samsung verbunden")
-                                      synchronized(pending) { pending.forEach { webSocket.send(it) }; pending.clear() }
-                                  }
-                                  "ms.channel.timeOut", "ms.error" -> info("Samsung: Am TV 'Zulassen' waehlen und neu versuchen")
-                              }
-                          } catch (_: Exception) {}
-                      }
-                      override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                          ready = false; ws = null
-                          if (secure) connect(false) else info("Samsung: Verbindung fehlgeschlagen (${t.message})")
-                      }
-                      override fun onClosed(webSocket: WebSocket, code: Int, reason: String) { ready = false; ws = null }
-                  })
-              }
-
-              override fun send(key: Key) {
-                  val code = when (key) {
-                      Key.POWER -> "KEY_POWER"; Key.VOL_UP -> "KEY_VOLUP"; Key.VOL_DOWN -> "KEY_VOLDOWN"
-                      Key.MUTE -> "KEY_MUTE"; Key.CH_UP -> "KEY_CHUP"; Key.CH_DOWN -> "KEY_CHDOWN"
-                      Key.UP -> "KEY_UP"; Key.DOWN -> "KEY_DOWN"; Key.LEFT -> "KEY_LEFT"; Key.RIGHT -> "KEY_RIGHT"
-                      Key.OK -> "KEY_ENTER"; Key.BACK -> "KEY_RETURN"; Key.HOME -> "KEY_HOME"
-                      Key.MENU -> "KEY_MENU"; Key.PLAY -> "KEY_PLAY"
-                  }
-                  val msg = JSONObject().put("method", "ms.remote.control").put(
-                      "params", JSONObject().put("Cmd", "Click").put("DataOfCmd", code)
-                          .put("Option", "false").put("TypeOfRemote", "SendRemoteKey")
-                  ).toString()
-                  if (ready) ws?.send(msg) else {
-                      synchronized(pending) { if (pending.size < 5) pending.add(msg) }
-                      if (ws == null) connect(true)
+              static void add(String fach, String woerter) {
+                  for (String w : woerter.trim().split("\\s+")) {
+                      LEX.put(w.toLowerCase(Locale.GERMAN), fach);
                   }
               }
 
-              override fun close() { ws?.close(1000, null); ws = null }
-          }
-
-          // ---------------------------------------------------------------- LG webOS
-          class LgRemote(
-              private val ip: String,
-              private val prefs: SharedPreferences,
-              private val info: (String) -> Unit
-          ) : NetRemote {
-              private val client = unsafeClient()
-              // Der Tasten-Kanal bekommt kein Ping, sonst trennt ihn der TV manchmal.
-              private val pointerClient = unsafeClient(0)
-              private var ws: WebSocket? = null
-              private var pointer: WebSocket? = null
-              @Volatile private var ready = false
-              @Volatile private var pointerOpen = false
-              @Volatile private var pointerRequested = false
-              private val queued = ArrayList<String>()
-              private var muted = false
-              private var playing = true
-              private var n = 0
-
-              init { connect(true) }
-
-              private fun registerJson(): String {
-                  val perms = JSONArray(listOf(
-                      "LAUNCH", "LAUNCH_WEBAPP", "APP_TO_APP", "CLOSE", "TEST_OPEN", "TEST_PROTECTED",
-                      "CONTROL_AUDIO", "CONTROL_DISPLAY", "CONTROL_INPUT_JOYSTICK", "CONTROL_INPUT_MEDIA_RECORDING",
-                      "CONTROL_INPUT_MEDIA_PLAYBACK", "CONTROL_INPUT_TV", "CONTROL_POWER", "CONTROL_TV_SCREEN",
-                      "CONTROL_TV_STANBY", "CONTROL_BLUETOOTH", "CONTROL_INPUT_TEXT", "CONTROL_MOUSE_AND_KEYBOARD",
-                      "READ_APP_STATUS", "READ_CURRENT_CHANNEL", "READ_INPUT_DEVICE_LIST", "READ_NETWORK_STATE",
-                      "READ_RUNNING_APPS", "READ_TV_CHANNEL_LIST", "READ_POWER_STATE", "READ_COUNTRY_INFO",
-                      "READ_SETTINGS", "READ_INSTALLED_APPS", "READ_LGE_SDX", "READ_NOTIFICATIONS",
-                      "READ_UPDATE_INFO", "SEARCH", "WRITE_SETTINGS", "WRITE_NOTIFICATION_ALERT",
-                      "WRITE_NOTIFICATION_TOAST", "UPDATE_FROM_REMOTE_APP"
-                  ))
-                  // Ohne Signatur: Der TV zeigt den Koppeln-Dialog und gewaehrt die hier genannten Rechte.
-                  val manifest = JSONObject().put("manifestVersion", 1).put("appVersion", "1.1").put("permissions", perms)
-                  val payload = JSONObject().put("forcePairing", false).put("pairingType", "PROMPT").put("manifest", manifest)
-                  prefs.getString("lg2_$ip", null)?.let { payload.put("client-key", it) }
-                  return JSONObject().put("type", "register").put("id", "register_0").put("payload", payload).toString()
-              }
-
-              private fun resetPointer() {
-                  pointerOpen = false; pointerRequested = false
-                  try { pointer?.cancel() } catch (_: Exception) {}
-                  pointer = null
-              }
-
-              private fun requestPointer() {
-                  if (pointerRequested || !ready) return
-                  pointerRequested = true
-                  ws?.send(JSONObject().put("id", "ptr").put("type", "request")
-                      .put("uri", "ssap://com.webos.service.networkinput/getPointerInputSocket").toString())
-              }
-
-              private fun openPointer(path: String) {
-                  pointer = pointerClient.newWebSocket(Request.Builder().url(path).build(), object : WebSocketListener() {
-                      override fun onOpen(webSocket: WebSocket, response: Response) {
-                          pointerOpen = true
-                          synchronized(queued) { queued.forEach { webSocket.send(it) }; queued.clear() }
-                      }
-                      override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                          pointerOpen = false; pointerRequested = false; pointer = null
-                          info("LG: Tasten-Kanal Fehler (${t.message})")
-                      }
-                      override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                          pointerOpen = false; pointerRequested = false; pointer = null
-                      }
-                  })
-              }
-
-              private fun connect(secure: Boolean) {
-                  val url = if (secure) "wss://$ip:3001" else "ws://$ip:3000"
-                  ws = client.newWebSocket(Request.Builder().url(url).build(), object : WebSocketListener() {
-                      override fun onOpen(webSocket: WebSocket, response: Response) {
-                          info("LG: Am TV die Verbindung bestaetigen")
-                          webSocket.send(registerJson())
-                      }
-                      override fun onMessage(webSocket: WebSocket, text: String) {
-                          try {
-                              val j = JSONObject(text)
-                              when (j.optString("type")) {
-                                  "registered" -> {
-                                      j.optJSONObject("payload")?.optString("client-key")?.takeIf { it.isNotEmpty() }
-                                          ?.let { prefs.edit().putString("lg2_$ip", it).apply() }
-                                      ready = true
-                                      info("LG verbunden")
-                                      requestPointer()
-                                  }
-                                  "response" -> if (j.optString("id") == "ptr") {
-                                      val path = j.optJSONObject("payload")?.optString("socketPath")
-                                      if (!path.isNullOrEmpty()) openPointer(path)
-                                      else { pointerRequested = false; info("LG: Tasten-Kanal abgelehnt, bitte neu koppeln") }
-                                  }
-                                  "error" -> {
-                                      if (j.optString("id") == "ptr") pointerRequested = false
-                                      info("LG: " + j.optString("error"))
-                                  }
-                              }
-                          } catch (_: Exception) {}
-                      }
-                      override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                          ready = false; ws = null; resetPointer()
-                          if (secure) connect(false) else info("LG: Verbindung fehlgeschlagen (${t.message})")
-                      }
-                      override fun onClosed(webSocket: WebSocket, code: Int, reason: String) { ready = false; ws = null; resetPointer() }
-                  })
-              }
-
-              override fun send(key: Key) {
-                  if (ws == null) { connect(true); return }
-                  if (!ready) return
-                  fun req(uri: String, payload: JSONObject = JSONObject()) {
-                      ws?.send(JSONObject().put("id", "r${n++}").put("type", "request").put("uri", uri).put("payload", payload).toString())
+              static void task(String anweisung, String verben) {
+                  for (String w : verben.trim().split("\\s+")) {
+                      TASK.put(w.toLowerCase(Locale.GERMAN), anweisung);
                   }
-                  fun btn(name: String) {
-                      val msg = "type:button\nname:$name\n\n"
-                      if (pointerOpen && pointer != null) {
-                          if (pointer?.send(msg) != true) resetPointer()
-                      } else {
-                          synchronized(queued) { if (queued.size < 5) queued.add(msg) }
-                          requestPointer()
+              }
+
+              static {
+                  add("Mathe", "Addition Subtraktion Multiplikation Division Summe Differenz Produkt Quotient "
+                          + "Gleichung Ungleichung Variable Term Bruch Zähler Nenner Dezimalzahl Prozent Zinsen "
+                          + "Dreisatz Wurzel Potenz Quadrat Kubik Primzahl Teiler Vielfaches Dreieck Viereck Rechteck "
+                          + "Kreis Kugel Zylinder Kegel Pyramide Würfel Fläche Umfang Volumen Radius Durchmesser "
+                          + "Winkel Gerade Parabel Funktion Steigung Achsenabschnitt Nullstelle Ableitung Integral "
+                          + "Wahrscheinlichkeit Mittelwert Median Diagramm Koordinatensystem Satz Pythagoras Hypotenuse "
+                          + "Kathete plus minus mal geteilt gleich Zahl Ziffer Rechnung Ergebnis Lösung");
+
+                  add("Deutsch", "Nomen Substantiv Verb Adjektiv Adverb Artikel Pronomen Präposition Konjunktion "
+                          + "Satz Hauptsatz Nebensatz Subjekt Prädikat Objekt Akkusativ Dativ Genitiv Nominativ "
+                          + "Präsens Präteritum Perfekt Plusquamperfekt Futur Gedicht Strophe Vers Reim Metapher "
+                          + "Vergleich Erzählung Märchen Fabel Roman Novelle Autor Erzähler Inhaltsangabe Erörterung "
+                          + "Charakterisierung Interpretation Textanalyse Aufsatz Brief Bericht Rechtschreibung "
+                          + "Grammatik Komma Wortart Satzglied Text Absatz Einleitung Hauptteil Schluss Argument");
+
+                  add("Englisch", "Englisch Vokabeln Übersetzung übersetzen Present Past Simple Continuous "
+                          + "Conditional Passiv Vokabel Aussprache");
+
+                  add("Geschichte", "Mittelalter Antike Steinzeit Römer Griechen Ägypter Pharao Pyramide Kaiser König "
+                          + "Krieg Weltkrieg Revolution Reformation Luther Napoleon Demokratie Diktatur Republik "
+                          + "Kolonialismus Industrialisierung Nationalsozialismus Hitler Holocaust Mauerfall "
+                          + "Wiedervereinigung Kalter Jahrhundert Jahrhunderte Epoche Ritter Burg Kreuzzüge Pest "
+                          + "Französische Kaiserreich Weimarer Bismarck Ursache Folge Quelle");
+
+                  add("Biologie", "Zelle Zellkern Organismus Pflanze Tier Mensch Photosynthese Chlorophyll Atmung "
+                          + "Blut Herz Lunge Niere Leber Gehirn Nerven Skelett Muskel Haut Verdauung Vererbung Gen "
+                          + "Chromosom Evolution Ökosystem Nahrungskette Nahrungsnetz Säugetier Reptil Amphibie "
+                          + "Insekt Vogel Fisch Bakterien Viren Immunsystem Hormon Fortpflanzung Wirbeltier Wald "
+                          + "Biotop Art Lebewesen Stoffwechsel Enzym");
+
+                  add("Physik", "Kraft Masse Gewicht Geschwindigkeit Beschleunigung Energie Arbeit Leistung Druck "
+                          + "Temperatur Wärme Licht Schall Strom Spannung Widerstand Ohm Stromkreis Magnet Elektron "
+                          + "Atom Schwerkraft Gravitation Reibung Hebel Newton Joule Watt Volt Ampere Welle Frequenz "
+                          + "Reflexion Brechung Linse Spiegel Optik Mechanik Dichte Auftrieb");
+
+                  add("Chemie", "Element Verbindung Molekül Atom Periodensystem Säure Base Lauge Salz Reaktion "
+                          + "Oxidation Reduktion Metall Nichtmetall Wasserstoff Sauerstoff Kohlenstoff Stickstoff "
+                          + "Natrium Chlor Eisen Gold Kupfer Ion Bindung Gemisch Lösung Destillation Filtration "
+                          + "Indikator pH Katalysator Brennstoff Verbrennung Formel Gleichung Stoff");
+
+                  add("Erdkunde", "Kontinent Land Staat Hauptstadt Gebirge Fluss Meer Ozean See Insel Wüste "
+                          + "Regenwald Klima Wetter Vulkan Erdbeben Plattentektonik Landwirtschaft Industrie "
+                          + "Bevölkerung Einwohner Karte Maßstab Himalaya Alpen Rhein Donau Europa Asien Afrika "
+                          + "Amerika Australien Antarktis Gletscher Tourismus Rohstoffe Globalisierung");
+
+                  // ---- Aufgaben-Wörter (Operatoren): was soll gemacht werden? ----
+                  task("Rechne Schritt für Schritt und nenne das Ergebnis klar.",
+                          "berechne berechnen rechne rechnen ausrechnen löse lösen bestimme bestimmen ermittle ermitteln");
+                  task("Erkläre es verständlich und mit einem Beispiel.",
+                          "erkläre erklären erläutere erläutern begründe begründen warum wieso weshalb");
+                  task("Beschreibe es sachlich und vollständig.",
+                          "beschreibe beschreiben schildere schildern nenne nennen");
+                  task("Fasse den Inhalt kurz in eigenen Worten zusammen.",
+                          "fasse zusammenfassen zusammenfassung zusammen");
+                  task("Übersetze den Text korrekt und natürlich.",
+                          "übersetze übersetzen übersetzung");
+                  task("Analysiere genau und belege mit Argumenten.",
+                          "analysiere analysieren untersuche untersuchen interpretiere interpretieren vergleiche vergleichen");
+                  task("Schreibe einen gut strukturierten Text mit Einleitung, Hauptteil und Schluss.",
+                          "schreibe schreiben verfasse verfassen erörtere erörtern aufsatz");
+                  task("Korrigiere die Fehler und erkläre kurz die Regel dahinter.",
+                          "korrigiere korrigieren verbessere verbessern fehler");
+                  task("Zeichne oder beschreibe die Skizze in Worten und beschrifte sie.",
+                          "zeichne zeichnen skizziere skizzieren");
+              }
+
+              static final String[] SUFFIXE = {"en", "er", "es", "em", "e", "n", "s", "t", "st"};
+
+              /** Sucht ein Wort im Wortschatz, auch mit einfachen Endungen (Haus / Häuser-Näherung). */
+              static String lookup(Map<String, String> map, String key) {
+                  String r = map.get(key);
+                  if (r != null) return r;
+                  for (String suf : SUFFIXE) {
+                      if (key.endsWith(suf) && key.length() - suf.length() >= 3) {
+                          String stamm = key.substring(0, key.length() - suf.length());
+                          r = map.get(stamm);
+                          if (r == null) r = map.get(stamm + "e");
+                          if (r == null) r = map.get(stamm + "en");
+                          if (r != null) return r;
                       }
                   }
-                  when (key) {
-                      Key.POWER -> req("ssap://system/turnOff")
-                      Key.VOL_UP -> req("ssap://audio/volumeUp")
-                      Key.VOL_DOWN -> req("ssap://audio/volumeDown")
-                      Key.MUTE -> { muted = !muted; req("ssap://audio/setMute", JSONObject().put("mute", muted)) }
-                      Key.CH_UP -> req("ssap://tv/channelUp")
-                      Key.CH_DOWN -> req("ssap://tv/channelDown")
-                      Key.UP -> btn("UP"); Key.DOWN -> btn("DOWN"); Key.LEFT -> btn("LEFT"); Key.RIGHT -> btn("RIGHT")
-                      Key.OK -> btn("ENTER"); Key.BACK -> btn("BACK"); Key.MENU -> btn("MENU")
-                      Key.HOME -> req("ssap://system.launcher/launch", JSONObject().put("id", "com.webos.app.home"))
-                      Key.PLAY -> { playing = !playing; req(if (playing) "ssap://media.controls/play" else "ssap://media.controls/pause") }
-                  }
+                  return null;
               }
 
-              override fun close() { resetPointer(); ws?.close(1000, null); ws = null }
-          }
+              // ----------------- Mini-Taschenrechner (offline) -----------------
+              static class Parser {
+                  final String s;
+                  int i = 0;
 
-          // ---------------------------------------------------------------- Roku (HTTP ECP)
-          class RokuRemote(private val ip: String, private val info: (String) -> Unit) : NetRemote {
-              private val client = OkHttpClient.Builder().connectTimeout(3, TimeUnit.SECONDS).build()
-              init { info("Roku bereit") }
+                  Parser(String s) { this.s = s.replace(" ", ""); }
 
-              override fun send(key: Key) {
-                  val k = when (key) {
-                      Key.POWER -> "Power"; Key.VOL_UP -> "VolumeUp"; Key.VOL_DOWN -> "VolumeDown"; Key.MUTE -> "VolumeMute"
-                      Key.CH_UP -> "ChannelUp"; Key.CH_DOWN -> "ChannelDown"
-                      Key.UP -> "Up"; Key.DOWN -> "Down"; Key.LEFT -> "Left"; Key.RIGHT -> "Right"
-                      Key.OK -> "Select"; Key.BACK -> "Back"; Key.HOME -> "Home"; Key.MENU -> "Info"; Key.PLAY -> "Play"
-                  }
-                  val req = Request.Builder().url("http://$ip:8060/keypress/$k").post(ByteArray(0).toRequestBody()).build()
-                  client.newCall(req).enqueue(object : Callback {
-                      override fun onFailure(call: Call, e: IOException) { info("Roku: ${e.message}") }
-                      override fun onResponse(call: Call, response: Response) { response.close() }
-                  })
-              }
-
-              override fun close() {}
-          }
-          EOF_5
-          cat > app/src/main/java/de/fernbedienung/Bt.kt <<'EOF_6'
-          package de.fernbedienung
-
-          import android.annotation.SuppressLint
-          import android.bluetooth.*
-          import android.content.Context
-
-          /**
-           * Das Handy gibt sich per Bluetooth als "Consumer-Control"-Fernbedienung (HID) aus.
-           * Funktioniert mit Geraeten, die Bluetooth-Fernbedienungen/Tastaturen akzeptieren
-           * (Android/Google TV, Fire TV, Apple TV, manche Beamer).
-           */
-          @SuppressLint("MissingPermission")
-          class BtHid(private val ctx: Context, private val info: (String) -> Unit) {
-              private var hid: BluetoothHidDevice? = null
-              private var host: BluetoothDevice? = null
-              private val adapter: BluetoothAdapter? =
-                  (ctx.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
-
-              companion object {
-                  private val DESC = intArrayOf(
-                      0x05, 0x0C, 0x09, 0x01, 0xA1, 0x01, 0x85, 0x01,
-                      0x15, 0x00, 0x26, 0xFF, 0x03, 0x19, 0x00, 0x2A, 0xFF, 0x03,
-                      0x75, 0x10, 0x95, 0x01, 0x81, 0x00, 0xC0,
-                      0x05, 0x01, 0x09, 0x06, 0xA1, 0x01, 0x85, 0x02,
-                      0x05, 0x07, 0x19, 0xE0, 0x29, 0xE7, 0x15, 0x00, 0x25, 0x01,
-                      0x75, 0x01, 0x95, 0x08, 0x81, 0x02,
-                      0x95, 0x01, 0x75, 0x08, 0x81, 0x01,
-                      0x95, 0x06, 0x75, 0x08, 0x15, 0x00, 0x25, 0x65,
-                      0x05, 0x07, 0x19, 0x00, 0x29, 0x65, 0x81, 0x00, 0xC0
-                  ).map { it.toByte() }.toByteArray()
-
-                  fun kbUsage(k: Key): Int = when (k) {
-                      Key.UP -> 0x52; Key.DOWN -> 0x51; Key.LEFT -> 0x50; Key.RIGHT -> 0x4F
-                      Key.OK -> 0x28; Key.BACK -> 0x29
-                      else -> 0
+                  double parse() {
+                      double v = expr();
+                      if (i < s.length()) throw new RuntimeException("Rest");
+                      return v;
                   }
 
-                  fun usage(k: Key): Int = when (k) {
-                      Key.POWER -> 0x30; Key.VOL_UP -> 0xE9; Key.VOL_DOWN -> 0xEA; Key.MUTE -> 0xE2
-                      Key.CH_UP -> 0x9C; Key.CH_DOWN -> 0x9D
-                      Key.UP -> 0x42; Key.DOWN -> 0x43; Key.LEFT -> 0x44; Key.RIGHT -> 0x45; Key.OK -> 0x41
-                      Key.BACK -> 0x224; Key.HOME -> 0x223; Key.MENU -> 0x40; Key.PLAY -> 0xCD
-                  }
-              }
-
-              fun start(device: BluetoothDevice) {
-                  host = device
-                  val ad = adapter ?: run { info("Kein Bluetooth"); return }
-                  if (device.bondState != BluetoothDevice.BOND_BONDED) {
-                      device.createBond()
-                      info("Erst koppeln: Anfrage bestaetigen (am TV ggf. auch), dann das Geraet erneut antippen.")
-                      return
-                  }
-                  info("Bluetooth: verbinde ...")
-                  ad.getProfileProxy(ctx, object : BluetoothProfile.ServiceListener {
-                      override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) {
-                          val h = proxy as BluetoothHidDevice
-                          hid = h
-                          val sdp = BluetoothHidDeviceAppSdpSettings(
-                              "Handy Fernbedienung", "Remote", "DIY", BluetoothHidDevice.SUBCLASS1_COMBO, DESC
-                          )
-                          h.registerApp(sdp, null, null, ctx.mainExecutor, object : BluetoothHidDevice.Callback() {
-                              override fun onAppStatusChanged(pluggedDevice: BluetoothDevice?, registered: Boolean) {
-                                  if (registered) h.connect(device) else info("HID-Registrierung fehlgeschlagen")
-                              }
-                              override fun onConnectionStateChanged(d: BluetoothDevice, state: Int) {
-                                  if (d.address != device.address) return
-                                  info(when (state) {
-                                      BluetoothProfile.STATE_CONNECTED -> "Bluetooth verbunden"
-                                      BluetoothProfile.STATE_CONNECTING -> "Bluetooth: verbinde ..."
-                                      else -> "Getrennt. Das Geraet muss das Handy als Tastatur/Fernbedienung akzeptieren."
-                                  })
-                              }
-                          })
+                  double expr() {
+                      double v = term();
+                      while (i < s.length()) {
+                          char c = s.charAt(i);
+                          if (c == '+') { i++; v += term(); }
+                          else if (c == '-') { i++; v -= term(); }
+                          else break;
                       }
-                      override fun onServiceDisconnected(profile: Int) { hid = null }
-                  }, BluetoothProfile.HID_DEVICE)
-              }
-
-              fun press(k: Key) {
-                  val h = hid ?: return
-                  val d = host ?: return
-                  val kb = kbUsage(k)
-                  if (kb != 0) {
-                      h.sendReport(d, 2, byteArrayOf(0, 0, kb.toByte(), 0, 0, 0, 0, 0))
-                      h.sendReport(d, 2, ByteArray(8))
-                      return
+                      return v;
                   }
-                  val u = usage(k)
-                  h.sendReport(d, 1, byteArrayOf((u and 0xFF).toByte(), (u shr 8).toByte()))
-                  h.sendReport(d, 1, byteArrayOf(0, 0))
-              }
 
-              fun stop() {
-                  try { hid?.unregisterApp() } catch (_: Exception) {}
-                  try { adapter?.closeProfileProxy(BluetoothProfile.HID_DEVICE, hid) } catch (_: Exception) {}
-                  hid = null
-              }
-          }
-          EOF_6
-          cat > app/src/main/java/de/fernbedienung/MainActivity.kt <<'EOF_7'
-          package de.fernbedienung
-
-          import android.Manifest
-          import android.annotation.SuppressLint
-          import android.app.Activity
-          import android.bluetooth.BluetoothAdapter
-          import android.bluetooth.BluetoothDevice
-          import android.bluetooth.BluetoothManager
-          import android.content.BroadcastReceiver
-          import android.content.Context
-          import android.content.Intent
-          import android.content.IntentFilter
-          import android.content.SharedPreferences
-          import android.content.res.ColorStateList
-          import android.graphics.Typeface
-          import android.graphics.drawable.GradientDrawable
-          import android.graphics.drawable.RippleDrawable
-          import android.net.wifi.WifiManager
-          import android.os.Build
-          import android.os.Bundle
-          import android.view.Gravity
-          import android.view.HapticFeedbackConstants
-          import android.view.View
-          import android.widget.*
-          import okhttp3.OkHttpClient
-          import okhttp3.Request
-          import org.json.JSONObject
-          import java.net.DatagramPacket
-          import java.net.DatagramSocket
-          import java.net.InetAddress
-          import java.net.SocketTimeoutException
-          import java.util.concurrent.ConcurrentHashMap
-          import java.util.concurrent.TimeUnit
-          import java.util.concurrent.atomic.AtomicInteger
-
-          enum class Kind(val label: String) { SAMSUNG("Samsung"), LG("LG webOS"), ROKU("Roku"), OTHER("Sonstige") }
-
-          data class Dev(val name: String, val ip: String?, val bt: BluetoothDevice?, val kind: Kind)
-
-          /** Markenfilter: nur Geraete mit diesen Namen werden angezeigt. Liste einfach erweitern. */
-          object Brands {
-              private val exact = setOf("lg", "lge", "tv", "nec", "tcl")
-              private val prefix = listOf(
-                  "samsung", "sony", "bravia", "philips", "panasonic", "epson", "benq", "optoma", "viewsonic",
-                  "hisense", "xiaomi", "roku", "vizio", "sharp", "toshiba", "acer", "chromecast", "webos",
-                  "projector", "projektor", "beamer", "fire", "bose"
-              )
-
-              private fun tokens(t: String) = t.lowercase().split(Regex("[^a-z0-9]+")).filter { it.isNotEmpty() }
-
-              fun matches(t: String) = tokens(t).any { w -> w in exact || prefix.any { w.startsWith(it) } }
-
-              fun kind(t: String): Kind {
-                  val l = t.lowercase()
-                  val tk = tokens(t)
-                  return when {
-                      "samsung" in l -> Kind.SAMSUNG
-                      "webos" in l || tk.any { it == "lg" || it == "lge" } -> Kind.LG
-                      "roku" in l -> Kind.ROKU
-                      else -> Kind.OTHER
+                  double term() {
+                      double v = pow();
+                      while (i < s.length()) {
+                          char c = s.charAt(i);
+                          if (c == '*') { i++; v *= pow(); }
+                          else if (c == '/') { i++; v /= pow(); }
+                          else break;
+                      }
+                      return v;
                   }
-              }
-          }
 
-          class MainActivity : Activity() {
-              private val cBg = 0xFF101216.toInt()
-              private val cBtn = 0xFF252A33.toInt()
-              private val cAccent = 0xFF3D7BFF.toInt()
-              private val cRed = 0xFFD93A3A.toInt()
-              private val cText = 0xFFF2F4F8.toInt()
-              private val cMuted = 0xFF9AA0AA.toInt()
-
-              private lateinit var prefs: SharedPreferences
-              private lateinit var listBox: LinearLayout
-              private lateinit var status: TextView
-              private val found = LinkedHashMap<String, Dev>()
-              private var btHidden = 0
-              private var inRemote = false
-              private var netRemote: NetRemote? = null
-              private var btHid: BtHid? = null
-              private var rxRegistered = false
-
-              @Suppress("DEPRECATION")
-              override fun onCreate(savedInstanceState: Bundle?) {
-                  super.onCreate(savedInstanceState)
-                  prefs = getSharedPreferences("fb", MODE_PRIVATE)
-                  window.statusBarColor = cBg
-                  window.navigationBarColor = cBg
-                  window.decorView.setBackgroundColor(cBg)
-                  val p = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION)
-                  if (Build.VERSION.SDK_INT >= 31) {
-                      p += Manifest.permission.BLUETOOTH_SCAN
-                      p += Manifest.permission.BLUETOOTH_CONNECT
+                  double pow() {
+                      double b = unary();
+                      if (i < s.length() && s.charAt(i) == '^') { i++; return Math.pow(b, pow()); }
+                      return b;
                   }
-                  requestPermissions(p.toTypedArray(), 1)
-                  showMain()
-              }
 
-              override fun onDestroy() {
-                  super.onDestroy()
-                  cleanupRemote()
-                  if (rxRegistered) try { unregisterReceiver(btRx) } catch (_: Exception) {}
-              }
-
-              @Deprecated("Deprecated in Java")
-              override fun onBackPressed() {
-                  if (inRemote) showMain() else super.onBackPressed()
-              }
-
-              // ------------------------------------------------------------ UI helpers
-              private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
-
-              private fun shape(color: Int, r: Int = 18) = GradientDrawable().apply {
-                  setColor(color); cornerRadius = dp(r).toFloat()
-              }
-
-              private fun lp(w: Int, h: Int, weight: Float = 0f) =
-                  LinearLayout.LayoutParams(w, h, weight).apply { setMargins(dp(4), dp(4), dp(4), dp(4)) }
-
-              private fun tv(text: String, size: Float = 14f, color: Int = cText, bold: Boolean = false) = TextView(this).apply {
-                  this.text = text; textSize = size; setTextColor(color)
-                  if (bold) setTypeface(typeface, Typeface.BOLD)
-                  setPadding(dp(4), dp(6), dp(4), dp(6))
-              }
-
-              private fun btn(text: String, color: Int = cBtn, onClick: () -> Unit) = Button(this).apply {
-                  this.text = text
-                  isAllCaps = false
-                  textSize = 16f
-                  setTextColor(cText)
-                  setTypeface(typeface, Typeface.BOLD)
-                  stateListAnimator = null
-                  minHeight = 0; minimumHeight = 0
-                  background = RippleDrawable(ColorStateList.valueOf(0x44FFFFFF), shape(color), null)
-                  setOnClickListener { it.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP); onClick() }
-              }
-
-              private fun setStatus(s: String) = runOnUiThread { if (::status.isInitialized) status.text = s }
-
-              // ------------------------------------------------------------ Hauptseite
-              private fun showMain() {
-                  cleanupRemote()
-                  inRemote = false
-                  val col = LinearLayout(this).apply {
-                      orientation = LinearLayout.VERTICAL
-                      setBackgroundColor(cBg)
-                      setPadding(dp(16), dp(48), dp(16), dp(16))
+                  double unary() {
+                      if (i < s.length() && s.charAt(i) == '-') { i++; return -unary(); }
+                      return atom();
                   }
-                  col.addView(tv("Fernbedienung", 30f, cText, true))
-                  val row = LinearLayout(this)
-                  row.addView(btn("WLAN scannen", cAccent) { scanWifi() }, lp(0, dp(56), 1f))
-                  row.addView(btn("Bluetooth scannen") { scanBt() }, lp(0, dp(56), 1f))
-                  col.addView(row)
-                  status = tv("Starte einen Scan. Angezeigt werden nur bekannte Marken (LG, Samsung, Sony, Epson, ...).", 14f, cMuted)
-                  col.addView(status)
-                  listBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-                  col.addView(ScrollView(this).apply { addView(listBox) }, LinearLayout.LayoutParams(-1, 0, 1f))
-                  setContentView(col)
-                  renderList()
-              }
 
-              private fun renderList() {
-                  listBox.removeAllViews()
-                  found.values.forEach { d ->
-                      val addr = d.ip ?: d.bt?.address ?: ""
-                      val type = if (d.bt != null) "Bluetooth" else d.kind.label
-                      val b = btn("${d.name}\n$addr · $type") { showRemote(d) }
-                      b.gravity = Gravity.START or Gravity.CENTER_VERTICAL
-                      b.setPadding(dp(18), dp(12), dp(18), dp(12))
-                      listBox.addView(b, lp(-1, -2))
+                  double atom() {
+                      if (i < s.length() && s.charAt(i) == '(') {
+                          i++;
+                          double v = expr();
+                          if (i >= s.length() || s.charAt(i) != ')') throw new RuntimeException("Klammer");
+                          i++;
+                          return v;
+                      }
+                      int st = i;
+                      while (i < s.length() && (Character.isDigit(s.charAt(i)) || s.charAt(i) == '.')) i++;
+                      if (st == i) throw new RuntimeException("Zahl");
+                      return Double.parseDouble(s.substring(st, i));
                   }
               }
 
-              private fun addDev(key: String, d: Dev) = runOnUiThread { found[key] = d; if (::listBox.isInitialized) renderList() }
+              static String versucheRechnen(String text) {
+                  String t = text.trim();
+                  while (t.endsWith("=") || t.endsWith("?")) t = t.substring(0, t.length() - 1).trim();
+                  if (t.isEmpty() || !t.matches("[0-9+\\-*/().,:xX×÷^ ]+")) return null;
+                  if (!t.matches(".*[+\\-*/:xX×÷^].*")) return null;
+                  t = t.replace(',', '.').replace('x', '*').replace('X', '*')
+                          .replace('×', '*').replace(':', '/').replace('÷', '/');
+                  try {
+                      double v = new Parser(t).parse();
+                      if (Double.isNaN(v) || Double.isInfinite(v)) return "Nicht definiert (Division durch 0?)";
+                      if (v == Math.rint(v) && Math.abs(v) < 1e15) return String.valueOf((long) v);
+                      return String.valueOf(Math.round(v * 1e8) / 1e8);
+                  } catch (Exception e) {
+                      return null;
+                  }
+              }
 
-              // ------------------------------------------------------------ WLAN-Scan (SSDP/UPnP)
-              private fun header(t: String, n: String) =
-                  Regex("(?im)^$n:\\s*(.+)$").find(t)?.groupValues?.get(1)?.trim()
+              // ----------------- Oberfläche -----------------
+              EditText urlIn, modelIn, taskIn;
+              TextView analysisOut, answerOut;
+              Button goBtn;
 
-              private fun tag(x: String, n: String) =
-                  Regex("<$n>(.*?)</$n>", RegexOption.DOT_MATCHES_ALL).find(x)?.groupValues?.get(1)?.trim()
+              int dp(int v) { return (int) (v * getResources().getDisplayMetrics().density); }
 
-              private fun scanWifi() {
-                  setStatus("Suche im WLAN (ca. 10 s) ...")
-                  val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-                  val lock = wm.createMulticastLock("ssdp").apply { setReferenceCounted(false); acquire() }
-                  Thread {
-                      val locs = ConcurrentHashMap<String, MutableSet<String>>()
-                      val servers = ConcurrentHashMap<String, String>()
+              EditText field(String hint, String value) {
+                  EditText e = new EditText(this);
+                  e.setHint(hint);
+                  e.setText(value);
+                  e.setSingleLine(true);
+                  return e;
+              }
+
+              @Override
+              protected void onCreate(Bundle b) {
+                  super.onCreate(b);
+                  ScrollView sv = new ScrollView(this);
+                  LinearLayout root = new LinearLayout(this);
+                  root.setOrientation(LinearLayout.VERTICAL);
+                  root.setPadding(dp(16), dp(40), dp(16), dp(24));
+                  sv.addView(root);
+
+                  TextView title = new TextView(this);
+                  title.setText("Hausi – Hausaufgabenhelfer");
+                  title.setTextSize(22);
+                  root.addView(title);
+
+                  urlIn = field("Ollama-Adresse", "http://127.0.0.1:11434");
+                  modelIn = field("Modell", "llama3.2:1b");
+                  root.addView(urlIn);
+                  root.addView(modelIn);
+
+                  taskIn = new EditText(this);
+                  taskIn.setHint("Aufgabe hier eintippen …");
+                  taskIn.setMinLines(5);
+                  taskIn.setGravity(Gravity.TOP);
+                  root.addView(taskIn);
+
+                  goBtn = new Button(this);
+                  goBtn.setText("Lösen");
+                  goBtn.setOnClickListener(v -> loesen());
+                  root.addView(goBtn);
+
+                  analysisOut = new TextView(this);
+                  analysisOut.setTextSize(13);
+                  analysisOut.setPadding(0, dp(12), 0, dp(8));
+                  analysisOut.setTextIsSelectable(true);
+                  root.addView(analysisOut);
+
+                  answerOut = new TextView(this);
+                  answerOut.setTextSize(16);
+                  answerOut.setTextIsSelectable(true);
+                  root.addView(answerOut);
+
+                  setContentView(sv);
+              }
+
+              // ----------------- Wort-Erkennung -----------------
+              void loesen() {
+                  final String text = taskIn.getText().toString().trim();
+                  if (text.isEmpty()) {
+                      answerOut.setText("Bitte erst eine Aufgabe eingeben.");
+                      return;
+                  }
+
+                  Map<String, Integer> punkte = new HashMap<>();
+                  LinkedHashSet<String> bekannt = new LinkedHashSet<>();
+                  LinkedHashSet<String> unbekannt = new LinkedHashSet<>();
+                  String hinweis = null;
+
+                  for (String t : text.split("[^\\p{L}\\p{N}ß]+")) {
+                      if (t.isEmpty() || t.matches("\\d+")) continue;
+                      String key = t.toLowerCase(Locale.GERMAN);
+                      String fach = lookup(LEX, key);
+                      String aufgabe = lookup(TASK, key);
+                      if (fach != null) {
+                          bekannt.add(t);
+                          Integer alt = punkte.get(fach);
+                          punkte.put(fach, alt == null ? 1 : alt + 1);
+                      }
+                      if (aufgabe != null) {
+                          bekannt.add(t);
+                          if (hinweis == null) hinweis = aufgabe;
+                      }
+                      if (fach == null && aufgabe == null) unbekannt.add(t);
+                  }
+                  if (text.matches(".*\\d.*[+\\-*/^=].*")) {
+                      Integer alt = punkte.get("Mathe");
+                      punkte.put("Mathe", alt == null ? 1 : alt + 1);
+                  }
+
+                  String fach = "Allgemein";
+                  int max = 0;
+                  for (Map.Entry<String, Integer> e : punkte.entrySet()) {
+                      if (e.getValue() > max) { max = e.getValue(); fach = e.getKey(); }
+                  }
+                  if (hinweis == null) hinweis = "Beantworte die Aufgabe verständlich und Schritt für Schritt.";
+
+                  analysisOut.setText("Fach erkannt: " + fach
+                          + "\nErkannte Wörter: " + (bekannt.isEmpty() ? "–" : String.join(", ", bekannt))
+                          + "\nUnbekannte Wörter: " + (unbekannt.isEmpty() ? "–" : String.join(", ", unbekannt)));
+
+                  // Reine Rechenaufgabe? Dann sofort offline lösen.
+                  String lokal = versucheRechnen(text);
+                  if (lokal != null) {
+                      answerOut.setText("Ergebnis (offline berechnet): " + lokal);
+                      return;
+                  }
+
+                  final String prompt = "Du bist ein freundlicher Hausaufgabenhelfer für Schüler.\n"
+                          + "Fach: " + fach + "\n"
+                          + "Anweisung: " + hinweis + "\n"
+                          + (bekannt.isEmpty() ? "" : "Wichtige Schlüsselwörter: " + String.join(", ", bekannt) + "\n")
+                          + "Antworte immer auf Deutsch, klar und nicht zu lang.\n\n"
+                          + "Aufgabe:\n" + text;
+
+                  final String basis = urlIn.getText().toString().trim().replaceAll("/+$", "");
+                  final String modell = modelIn.getText().toString().trim();
+
+                  goBtn.setEnabled(false);
+                  answerOut.setText("Ollama denkt nach …");
+
+                  new Thread(() -> {
+                      String ergebnis;
                       try {
-                          DatagramSocket().use { sock ->
-                              sock.soTimeout = 700
-                              val msg = ("M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\n" +
-                                  "MAN: \"ssdp:discover\"\r\nMX: 2\r\nST: ssdp:all\r\n\r\n").toByteArray()
-                              val grp = InetAddress.getByName("239.255.255.250")
-                              val end = System.currentTimeMillis() + 7000
-                              var next = 0L
-                              var sent = 0
-                              val buf = ByteArray(8192)
-                              while (System.currentTimeMillis() < end) {
-                                  if (sent < 3 && System.currentTimeMillis() >= next) {
-                                      sock.send(DatagramPacket(msg, msg.size, grp, 1900))
-                                      sent++; next = System.currentTimeMillis() + 1500
-                                  }
-                                  try {
-                                      val p = DatagramPacket(buf, buf.size)
-                                      sock.receive(p)
-                                      val txt = String(p.data, 0, p.length)
-                                      val ip = p.address.hostAddress ?: continue
-                                      header(txt, "LOCATION")?.let { locs.getOrPut(ip) { ConcurrentHashMap.newKeySet() }.add(it) }
-                                      header(txt, "SERVER")?.let { servers[ip] = it }
-                                  } catch (_: SocketTimeoutException) {}
-                              }
-                          }
-                      } catch (e: Exception) {
-                          setStatus("Fehler: ${e.message}")
+                          ergebnis = frageOllama(basis, modell, prompt);
+                      } catch (Exception e) {
+                          ergebnis = "Verbindung zu Ollama fehlgeschlagen.\n\n"
+                                  + "Prüfe in Termux:\n"
+                                  + "1) ollama serve  (muss laufen)\n"
+                                  + "2) ollama pull " + modell + "\n"
+                                  + "3) Adresse hier: http://127.0.0.1:11434\n\n"
+                                  + "Fehler: " + e.getMessage();
                       }
-
-                      val http = OkHttpClient.Builder().connectTimeout(2, TimeUnit.SECONDS).readTimeout(2, TimeUnit.SECONDS).build()
-                      val shown = AtomicInteger()
-                      val hidden = AtomicInteger()
-                      val ips = (locs.keys + servers.keys).toSet()
-                      ips.map { ip ->
-                          Thread {
-                              val sb = StringBuilder(servers[ip] ?: "")
-                              var name: String? = null
-                              for (u in locs[ip].orEmpty().take(3)) {
-                                  try {
-                                      http.newCall(Request.Builder().url(u).build()).execute().use { r ->
-                                          val x = r.body?.string().orEmpty()
-                                          if (name == null) name = tag(x, "friendlyName")
-                                          sb.append(' ').append(tag(x, "manufacturer") ?: "")
-                                              .append(' ').append(tag(x, "modelName") ?: "")
-                                              .append(' ').append(name ?: "")
-                                      }
-                                  } catch (_: Exception) {}
-                              }
-                              val text = sb.toString()
-                              if (Brands.matches(text)) {
-                                  shown.incrementAndGet()
-                                  addDev(ip, Dev(name ?: ip, ip, null, Brands.kind(text)))
-                              } else hidden.incrementAndGet()
-                          }.also { it.start() }
-                      }.forEach { it.join() }
-                      try { lock.release() } catch (_: Exception) {}
-                      setStatus("WLAN fertig: ${shown.get()} Geraet(e) gefunden, ${hidden.get()} andere ausgeblendet.")
-                  }.start()
+                      final String fertig = ergebnis;
+                      runOnUiThread(() -> {
+                          answerOut.setText(fertig);
+                          goBtn.setEnabled(true);
+                      });
+                  }).start();
               }
 
-              // ------------------------------------------------------------ Bluetooth-Scan
-              private val btRx = object : BroadcastReceiver() {
-                  override fun onReceive(c: Context, i: Intent) {
-                      when (i.action) {
-                          BluetoothDevice.ACTION_FOUND -> {
-                              val d = btExtra(i) ?: return
-                              handleBt(d, i.getStringExtra(BluetoothDevice.EXTRA_NAME))
-                          }
-                          BluetoothAdapter.ACTION_DISCOVERY_FINISHED -> {
-                              val n = found.values.count { it.bt != null }
-                              setStatus("Bluetooth fertig: $n gefunden, $btHidden andere ausgeblendet.")
-                          }
-                      }
+              // ----------------- Ollama-Verbindung -----------------
+              static String frageOllama(String basis, String modell, String prompt) throws Exception {
+                  JSONObject body = new JSONObject();
+                  body.put("model", modell);
+                  body.put("prompt", prompt);
+                  body.put("stream", false);
+
+                  HttpURLConnection c = (HttpURLConnection) new URL(basis + "/api/generate").openConnection();
+                  c.setRequestMethod("POST");
+                  c.setConnectTimeout(8000);
+                  c.setReadTimeout(300000);
+                  c.setDoOutput(true);
+                  c.setRequestProperty("Content-Type", "application/json");
+                  try (OutputStream os = c.getOutputStream()) {
+                      os.write(body.toString().getBytes(StandardCharsets.UTF_8));
                   }
+
+                  int code = c.getResponseCode();
+                  InputStream is = code >= 400 ? c.getErrorStream() : c.getInputStream();
+                  StringBuilder sb = new StringBuilder();
+                  try (BufferedReader r = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
+                      String line;
+                      while ((line = r.readLine()) != null) sb.append(line);
+                  }
+                  if (code >= 400) throw new Exception("HTTP " + code + ": " + sb);
+                  return new JSONObject(sb.toString()).optString("response", "(keine Antwort)").trim();
               }
-
-              @Suppress("DEPRECATION")
-              private fun btExtra(i: Intent): BluetoothDevice? =
-                  if (Build.VERSION.SDK_INT >= 33) i.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
-                  else i.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
-
-              @SuppressLint("MissingPermission")
-              private fun handleBt(d: BluetoothDevice, hint: String? = null) {
-                  val name = hint ?: d.name
-                  if (name.isNullOrBlank() || !Brands.matches(name)) { btHidden++; return }
-                  addDev(d.address, Dev(name, null, d, Kind.OTHER))
-              }
-
-              @SuppressLint("MissingPermission")
-              private fun scanBt() {
-                  val ad = (getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
-                  if (ad == null || !ad.isEnabled) { setStatus("Bluetooth ist ausgeschaltet."); return }
-                  btHidden = 0
-                  ad.bondedDevices.forEach { handleBt(it) }
-                  if (rxRegistered) try { unregisterReceiver(btRx) } catch (_: Exception) {}
-                  val f = IntentFilter(BluetoothDevice.ACTION_FOUND).apply { addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED) }
-                  if (Build.VERSION.SDK_INT >= 33) registerReceiver(btRx, f, Context.RECEIVER_EXPORTED) else registerReceiver(btRx, f)
-                  rxRegistered = true
-                  ad.cancelDiscovery()
-                  ad.startDiscovery()
-                  setStatus("Bluetooth-Suche laeuft (ca. 12 s) ...")
-              }
-
-              // ------------------------------------------------------------ Fernbedienung
-              private fun cleanupRemote() {
-                  netRemote?.close(); netRemote = null
-                  btHid?.stop(); btHid = null
-              }
-
-              private fun showRemote(d: Dev) {
-                  cleanupRemote()
-                  inRemote = true
-                  val col = LinearLayout(this).apply {
-                      orientation = LinearLayout.VERTICAL
-                      setBackgroundColor(cBg)
-                      setPadding(dp(16), dp(40), dp(16), dp(24))
-                  }
-                  col.addView(btn("← Geraeteliste") { showMain() }, lp(-1, dp(52)))
-                  col.addView(tv(d.name, 20f, cText, true))
-                  val infoView = tv("", 14f, cMuted)
-                  col.addView(infoView)
-                  val setInfo: (String) -> Unit = { s -> runOnUiThread { infoView.text = s } }
-
-                  var press: ((Key) -> Unit)? = null
-                  if (d.bt != null) {
-                      val h = BtHid(this, setInfo)
-                      btHid = h
-                      h.start(d.bt)
-                      press = { k -> h.press(k) }
-                  } else {
-                      val ip = d.ip ?: ""
-                      when (d.kind) {
-                          Kind.SAMSUNG -> { val r = SamsungRemote(ip, prefs, setInfo); netRemote = r; press = { k -> r.send(k) }
-                              setInfo("Samsung: verbinde ... (am TV ggf. 'Zulassen')") }
-                          Kind.LG -> { val r = LgRemote(ip, prefs, setInfo); netRemote = r; press = { k -> r.send(k) }
-                              setInfo("LG: verbinde ... (am TV ggf. bestaetigen)") }
-                          Kind.ROKU -> { val r = RokuRemote(ip, setInfo); netRemote = r; press = { k -> r.send(k) } }
-                          Kind.OTHER -> setInfo("Fuer diese Marke ist noch kein WLAN-Protokoll eingebaut. Versuche den Bluetooth-Scan.")
-                      }
-                  }
-                  val p = press
-                  if (p != null) col.addView(remotePad(p))
-
-                  if (d.bt == null && d.ip != null && d.kind != Kind.OTHER) {
-                      val mac = EditText(this).apply {
-                          hint = "MAC-Adresse des TVs (zum Einschalten)"
-                          setText(prefs.getString("mac_${d.ip}", ""))
-                          setTextColor(cText)
-                          setHintTextColor(cMuted)
-                          background = shape(0xFF1C2028.toInt(), 14)
-                          setPadding(dp(16), dp(14), dp(16), dp(14))
-                      }
-                      col.addView(mac, lp(-1, -2))
-                      col.addView(btn("Einschalten (Wake-on-LAN)") {
-                          prefs.edit().putString("mac_${d.ip}", mac.text.toString()).apply()
-                          Thread {
-                              val ok = try { wakeOnLan(mac.text.toString()) } catch (_: Exception) { false }
-                              setInfo(if (ok) "Magic Packet gesendet" else "MAC-Adresse ungueltig")
-                          }.start()
-                      }, lp(-1, dp(56)))
-                      if (d.kind == Kind.SAMSUNG && mac.text.isNullOrEmpty()) Thread {
-                          try {
-                              OkHttpClient.Builder().connectTimeout(2, TimeUnit.SECONDS).build()
-                                  .newCall(Request.Builder().url("http://${d.ip}:8001/api/v2/").build()).execute().use { r ->
-                                      val m = JSONObject(r.body?.string().orEmpty()).optJSONObject("device")?.optString("wifiMac")
-                                      if (!m.isNullOrEmpty()) runOnUiThread { mac.setText(m) }
-                                  }
-                          } catch (_: Exception) {}
-                      }.start()
-                  }
-                  setContentView(ScrollView(this).apply { setBackgroundColor(cBg); addView(col) })
-              }
-
-              private fun flat(text: String, size: Float = 18f, oval: Boolean = false, color: Int? = null, onClick: () -> Unit): TextView =
-                  TextView(this).apply {
-                      this.text = text; textSize = size; setTextColor(cText)
-                      setTypeface(typeface, Typeface.BOLD)
-                      gravity = Gravity.CENTER
-                      fun mk(c: Int) = GradientDrawable().apply {
-                          setColor(c)
-                          if (oval) setShape(GradientDrawable.OVAL) else setCornerRadius(dp(26).toFloat())
-                      }
-                      background = RippleDrawable(ColorStateList.valueOf(0x44FFFFFF), color?.let { mk(it) }, mk(0xFFFFFFFF.toInt()))
-                      isClickable = true
-                      setOnClickListener { it.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP); onClick() }
-                  }
-
-              private fun remotePad(p: (Key) -> Unit): LinearLayout {
-                  val c = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-
-                  // Power / Mute / Menue
-                  val top = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-                  top.addView(flat("Power", 13f, true, cRed) { p(Key.POWER) }, lp(dp(68), dp(68)))
-                  top.addView(flat("Mute", 16f, false, cBtn) { p(Key.MUTE) }, lp(0, dp(68), 1f))
-                  top.addView(flat("Menue", 16f, false, cBtn) { p(Key.MENU) }, lp(0, dp(68), 1f))
-                  c.addView(top)
-
-                  // Lautstaerke- und Programm-Wippe, in der Mitte Home und Play
-                  fun rocker(label: String, up: Key, down: Key, plus: String, minus: String): LinearLayout {
-                      val r = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; background = shape(cBtn, 32) }
-                      r.addView(flat(plus, 28f) { p(up) }, LinearLayout.LayoutParams(-1, 0, 1f))
-                      r.addView(TextView(this).apply { text = label; setTextColor(cMuted); textSize = 13f; gravity = Gravity.CENTER },
-                          LinearLayout.LayoutParams(-1, -2))
-                      r.addView(flat(minus, 28f) { p(down) }, LinearLayout.LayoutParams(-1, 0, 1f))
-                      return r
-                  }
-                  val mid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-                  mid.addView(flat("Home", 16f, false, cBtn) { p(Key.HOME) }, lp(-1, 0, 1f))
-                  mid.addView(flat("⏯", 22f, false, cBtn) { p(Key.PLAY) }, lp(-1, 0, 1f))
-                  val mix = LinearLayout(this)
-                  mix.addView(rocker("Vol", Key.VOL_UP, Key.VOL_DOWN, "+", "−"), lp(0, dp(190), 1f))
-                  mix.addView(mid, LinearLayout.LayoutParams(0, dp(190), 1f))
-                  mix.addView(rocker("CH", Key.CH_UP, Key.CH_DOWN, "+", "−"), lp(0, dp(190), 1f))
-                  c.addView(mix)
-
-                  // Steuerkreuz
-                  val pad = FrameLayout(this).apply {
-                      background = GradientDrawable().apply { setShape(GradientDrawable.OVAL); setColor(cBtn) }
-                  }
-                  fun arrow(t: String, g: Int, k: Key) {
-                      val lpa = FrameLayout.LayoutParams(dp(84), dp(84), g).apply { setMargins(dp(8), dp(8), dp(8), dp(8)) }
-                      pad.addView(flat(t, 26f, true) { p(k) }, lpa)
-                  }
-                  arrow("▲", Gravity.TOP or Gravity.CENTER_HORIZONTAL, Key.UP)
-                  arrow("▼", Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL, Key.DOWN)
-                  arrow("◀", Gravity.START or Gravity.CENTER_VERTICAL, Key.LEFT)
-                  arrow("▶", Gravity.END or Gravity.CENTER_VERTICAL, Key.RIGHT)
-                  pad.addView(flat("OK", 22f, true, cAccent) { p(Key.OK) }, FrameLayout.LayoutParams(dp(104), dp(104), Gravity.CENTER))
-                  c.addView(pad, LinearLayout.LayoutParams(dp(290), dp(290)).apply {
-                      gravity = Gravity.CENTER_HORIZONTAL; setMargins(0, dp(14), 0, dp(14))
-                  })
-
-                  // Zurueck
-                  c.addView(flat("Zurueck", 17f, false, cBtn) { p(Key.BACK) }, lp(-1, dp(60)))
-                  return c
-              }
-
           }
-          EOF_7
-      - uses: gradle/actions/setup-gradle@v4
+          EOF
+
+      - name: APK bauen
+        run: gradle assembleDebug --no-daemon
+
+      - name: APK hochladen
+        uses: actions/upload-artifact@v4
         with:
-          gradle-version: '8.9'
-      - run: gradle assembleDebug --no-daemon
-      - uses: actions/upload-artifact@v4
-        with:
-          name: Fernbedienung-APK
+          name: Hausi-APK
           path: app/build/outputs/apk/debug/app-debug.apk

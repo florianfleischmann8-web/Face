@@ -1,10 +1,9 @@
-name: Build Hausi APK
+name: Build GlassVault
 
-# Diese Datei nach .github/workflows/build.yml in dein GitHub-Repo legen.
-# Sie erzeugt das komplette Android-Projekt selbst und baut die APK.
-
+# Ablegen als: .github/workflows/build.yml  (Repo leer lassen, nur diese Datei!)
 on:
   push:
+    branches: [main]
   workflow_dispatch:
 
 jobs:
@@ -16,725 +15,815 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: 17
 
-      - name: Android-Lizenzen akzeptieren
-        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
-
-      - uses: gradle/actions/setup-gradle@v3
+      - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.4'
+          gradle-version: 8.7
 
-      - name: Projekt erzeugen
+      - name: Projekt erzeugen (kompletter Code)
         run: |
-          mkdir -p app/src/main/java/com/hausi/helper
+          mkdir -p app/src/main/java/com/glassvault/app
+          mkdir -p app/src/main/res/{values,drawable,layout,mipmap-anydpi,xml}
 
-          cat > settings.gradle <<'EOF'
+          cat > settings.gradle.kts <<'EOF'
           pluginManagement {
-              repositories {
-                  google()
-                  mavenCentral()
-                  gradlePluginPortal()
-              }
+              repositories { google(); mavenCentral(); gradlePluginPortal() }
           }
           dependencyResolutionManagement {
-              repositories {
-                  google()
-                  mavenCentral()
-              }
+              repositories { google(); mavenCentral() }
           }
-          rootProject.name = "Hausi"
-          include ':app'
+          rootProject.name = "GlassVault"
+          include(":app")
           EOF
 
-          cat > build.gradle <<'EOF'
+          cat > build.gradle.kts <<'EOF'
           plugins {
-              id 'com.android.application' version '8.2.2' apply false
+              id("com.android.application") version "8.5.2" apply false
+              id("org.jetbrains.kotlin.android") version "1.9.24" apply false
           }
           EOF
 
           cat > gradle.properties <<'EOF'
-          org.gradle.jvmargs=-Xmx2g
-          android.useAndroidX=false
+          org.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          kotlin.code.style=official
           EOF
 
-          cat > app/build.gradle <<'EOF'
+          cat > app/build.gradle.kts <<'EOF'
           plugins {
-              id 'com.android.application'
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
           }
           android {
-              namespace 'com.hausi.helper'
-              compileSdk 34
+              namespace = "com.glassvault.app"
+              compileSdk = 34
               defaultConfig {
-                  applicationId "com.hausi.helper"
-                  minSdk 24
-                  targetSdk 34
-                  versionCode 1
-                  versionName "1.0"
+                  applicationId = "com.glassvault.app"
+                  minSdk = 30
+                  targetSdk = 34
+                  versionCode = 1
+                  versionName = "1.0"
               }
               compileOptions {
-                  sourceCompatibility JavaVersion.VERSION_17
-                  targetCompatibility JavaVersion.VERSION_17
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
               }
+              kotlinOptions { jvmTarget = "17" }
+              buildFeatures { compose = true }
+              composeOptions { kotlinCompilerExtensionVersion = "1.5.14" }
+          }
+          dependencies {
+              implementation(platform("androidx.compose:compose-bom:2024.06.00"))
+              implementation("androidx.compose.ui:ui")
+              implementation("androidx.compose.foundation:foundation")
+              implementation("androidx.compose.material3:material3")
+              implementation("androidx.activity:activity-compose:1.9.0")
+              implementation("androidx.core:core-ktx:1.13.1")
+              implementation("androidx.fragment:fragment-ktx:1.7.1")
+              implementation("androidx.biometric:biometric:1.1.0")
           }
           EOF
 
           cat > app/src/main/AndroidManifest.xml <<'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.USE_BIOMETRIC" />
               <application
-                  android:label="Hausi"
-                  android:usesCleartextTraffic="true"
-                  android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+                  android:label="GlassVault"
+                  android:icon="@mipmap/ic_launcher"
+                  android:roundIcon="@mipmap/ic_launcher"
+                  android:theme="@style/Theme.Glass"
+                  android:allowBackup="false">
+
                   <activity
                       android:name=".MainActivity"
                       android:exported="true"
-                      android:windowSoftInputMode="adjustResize">
+                      android:launchMode="singleTask">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
                           <category android:name="android.intent.category.LAUNCHER" />
                       </intent-filter>
                   </activity>
+
+                  <activity
+                      android:name=".AuthActivity"
+                      android:exported="false"
+                      android:excludeFromRecents="true"
+                      android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+                  <service
+                      android:name=".GlassAutofill"
+                      android:exported="true"
+                      android:label="GlassVault"
+                      android:permission="android.permission.BIND_AUTOFILL_SERVICE">
+                      <intent-filter>
+                          <action android:name="android.service.autofill.AutofillService" />
+                      </intent-filter>
+                      <meta-data
+                          android:name="android.autofill"
+                          android:resource="@xml/autofill_config" />
+                  </service>
+
+                  <service
+                      android:name=".WalletTile"
+                      android:exported="true"
+                      android:label="Wallet"
+                      android:icon="@drawable/ic_logo_fg"
+                      android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+                      <intent-filter>
+                          <action android:name="android.service.quicksettings.action.QS_TILE" />
+                      </intent-filter>
+                  </service>
               </application>
           </manifest>
           EOF
 
-          cat > app/src/main/java/com/hausi/helper/MainActivity.java <<'EOF'
-          package com.hausi.helper;
+          cat > app/src/main/res/xml/autofill_config.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <autofill-service xmlns:android="http://schemas.android.com/apk/res/android" />
+          EOF
 
-          import android.animation.ObjectAnimator;
-          import android.animation.ValueAnimator;
-          import android.app.Activity;
-          import android.content.SharedPreferences;
-          import android.graphics.Color;
-          import android.graphics.Typeface;
-          import android.graphics.drawable.GradientDrawable;
-          import android.os.Bundle;
-          import android.text.InputType;
-          import android.view.Gravity;
-          import android.view.View;
-          import android.view.ViewGroup;
-          import android.widget.EditText;
-          import android.widget.FrameLayout;
-          import android.widget.LinearLayout;
-          import android.widget.ScrollView;
-          import android.widget.TextView;
+          cat > app/src/main/res/values/themes.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <style name="Theme.Glass" parent="android:Theme.Material.NoActionBar">
+                  <item name="android:windowBackground">#0B1020</item>
+                  <item name="android:statusBarColor">#0B1020</item>
+                  <item name="android:navigationBarColor">#0B1020</item>
+              </style>
+          </resources>
+          EOF
 
-          import org.json.JSONArray;
-          import org.json.JSONObject;
+          cat > app/src/main/res/layout/af_item.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent"
+              android:layout_height="wrap_content"
+              android:padding="12dp">
+              <TextView
+                  android:id="@+id/t"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:textSize="14sp" />
+          </LinearLayout>
+          EOF
 
-          import java.io.BufferedReader;
-          import java.io.InputStream;
-          import java.io.InputStreamReader;
-          import java.io.OutputStream;
-          import java.net.HttpURLConnection;
-          import java.net.URL;
-          import java.nio.charset.StandardCharsets;
-          import java.util.ArrayList;
-          import java.util.HashMap;
-          import java.util.LinkedHashSet;
-          import java.util.List;
-          import java.util.Locale;
-          import java.util.Map;
+          # ---------- Logo: Schild mit Schlüsselloch ----------
+          cat > app/src/main/res/drawable/ic_logo_fg.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp" android:height="108dp"
+              android:viewportWidth="108" android:viewportHeight="108">
+              <path
+                  android:fillColor="#FFFFFF"
+                  android:pathData="M54,30 L72,37 L72,52 C72,63 64,72 54,76 C44,72 36,63 36,52 L36,37 Z" />
+              <path
+                  android:fillColor="#4F46E5"
+                  android:pathData="M54,45 a4,4 0 1,1 0,8 a4,4 0 1,1 0,-8 Z M52.5,52 L55.5,52 L56.5,62 L51.5,62 Z" />
+          </vector>
+          EOF
 
-          public class MainActivity extends Activity {
+          cat > app/src/main/res/drawable/ic_logo_bg.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android">
+              <gradient android:angle="315" android:startColor="#6366F1" android:endColor="#8B5CF6" />
+          </shape>
+          EOF
 
-              // =====================================================
-              //  WORTSCHATZ: Hier trägst du deutsche Wörter ein.
-              //  add("Fach", "wort1 wort2 wort3 ...");
-              //  Einfach beliebig viele Zeilen ergänzen!
-              // =====================================================
-              static final Map<String, String> LEX = new HashMap<>();
-              static final Map<String, String> TASK = new HashMap<>();
+          cat > app/src/main/res/mipmap-anydpi/ic_launcher.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@drawable/ic_logo_bg" />
+              <foreground android:drawable="@drawable/ic_logo_fg" />
+              <monochrome android:drawable="@drawable/ic_logo_fg" />
+          </adaptive-icon>
+          EOF
 
-              static void add(String fach, String woerter) {
-                  for (String w : woerter.trim().split("\\s+")) {
-                      LEX.put(w.toLowerCase(Locale.GERMAN), fach);
+          # ---------- Verschlüsselung + Biometrie ----------
+          cat > app/src/main/java/com/glassvault/app/Vault.kt <<'EOF'
+          package com.glassvault.app
+
+          import android.content.Context
+          import android.security.keystore.KeyGenParameterSpec
+          import android.security.keystore.KeyProperties
+          import androidx.biometric.BiometricManager
+          import androidx.biometric.BiometricPrompt
+          import androidx.core.content.ContextCompat
+          import androidx.fragment.app.FragmentActivity
+          import org.json.JSONArray
+          import org.json.JSONObject
+          import java.io.File
+          import java.security.KeyStore
+          import java.security.SecureRandom
+          import javax.crypto.Cipher
+          import javax.crypto.KeyGenerator
+          import javax.crypto.SecretKey
+          import javax.crypto.spec.GCMParameterSpec
+
+          /** type = "login" (title=Website/App, user, secret=Passwort) oder "card" (secret=Nummer, extra="MM/YY|CVV") */
+          data class Entry(
+              val id: String, val type: String, val title: String,
+              val user: String, val secret: String, val extra: String
+          )
+
+          object Vault {
+              private const val ALIAS = "glassvault_master_v1"
+
+              // AES-256-GCM Schlüssel liegt im Android Keystore (hardwaregestützt, nicht exportierbar)
+              private fun key(): SecretKey {
+                  val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+                  (ks.getKey(ALIAS, null) as? SecretKey)?.let { return it }
+                  val kg = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+                  kg.init(
+                      KeyGenParameterSpec.Builder(
+                          ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+                      )
+                          .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                          .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                          .setKeySize(256)
+                          .build()
+                  )
+                  return kg.generateKey()
+              }
+
+              private fun file(c: Context) = File(c.filesDir, "vault.bin")
+
+              fun load(c: Context): List<Entry> {
+                  val f = file(c)
+                  if (!f.exists()) return emptyList()
+                  val raw = f.readBytes()
+                  val iv = raw.copyOfRange(0, 12)
+                  val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                  cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, iv))
+                  val json = String(cipher.doFinal(raw, 12, raw.size - 12), Charsets.UTF_8)
+                  val arr = JSONArray(json)
+                  return (0 until arr.length()).map {
+                      val o = arr.getJSONObject(it)
+                      Entry(
+                          o.getString("id"), o.getString("type"), o.getString("title"),
+                          o.getString("user"), o.getString("secret"), o.getString("extra")
+                      )
                   }
               }
 
-              static void task(String anweisung, String verben) {
-                  for (String w : verben.trim().split("\\s+")) {
-                      TASK.put(w.toLowerCase(Locale.GERMAN), anweisung);
+              fun save(c: Context, list: List<Entry>) {
+                  val arr = JSONArray()
+                  list.forEach {
+                      arr.put(
+                          JSONObject().put("id", it.id).put("type", it.type).put("title", it.title)
+                              .put("user", it.user).put("secret", it.secret).put("extra", it.extra)
+                      )
+                  }
+                  val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                  cipher.init(Cipher.ENCRYPT_MODE, key()) // Keystore erzeugt zufälligen IV
+                  val enc = cipher.doFinal(arr.toString().toByteArray(Charsets.UTF_8))
+                  val tmp = File(c.filesDir, "vault.tmp")
+                  tmp.writeBytes(cipher.iv + enc)
+                  tmp.renameTo(file(c)) // atomar
+              }
+
+              /** Strikt: Web nur exakte Domain/Subdomain (Phishing-Schutz), Apps per Paketname. */
+              fun match(l: List<Entry>, host: String, web: Boolean): List<Entry> = l.filter { e ->
+                  e.type == "login" && run {
+                      val t = e.title.lowercase().trim().removePrefix("https://").removePrefix("http://")
+                          .removePrefix("www.").substringBefore("/")
+                      val h = host.lowercase().removePrefix("www.")
+                      if (t.isBlank()) false
+                      else if (web) h == t || h.endsWith(".$t")
+                      else h.contains(t.substringBefore("."))
                   }
               }
 
-              static {
-                  add("Mathe", "Addition Subtraktion Multiplikation Division Summe Differenz Produkt Quotient "
-                          + "Gleichung Ungleichung Variable Term Bruch Zähler Nenner Dezimalzahl Prozent Zinsen "
-                          + "Dreisatz Wurzel Potenz Quadrat Kubik Primzahl Teiler Vielfaches Dreieck Viereck Rechteck "
-                          + "Kreis Kugel Zylinder Kegel Pyramide Würfel Fläche Umfang Volumen Radius Durchmesser "
-                          + "Winkel Gerade Parabel Funktion Steigung Achsenabschnitt Nullstelle Ableitung Integral "
-                          + "Wahrscheinlichkeit Mittelwert Median Diagramm Koordinatensystem Satz Pythagoras Hypotenuse "
-                          + "Kathete plus minus mal geteilt gleich Zahl Ziffer Rechnung Ergebnis Lösung");
-
-                  add("Deutsch", "Nomen Substantiv Verb Adjektiv Adverb Artikel Pronomen Präposition Konjunktion "
-                          + "Satz Hauptsatz Nebensatz Subjekt Prädikat Objekt Akkusativ Dativ Genitiv Nominativ "
-                          + "Präsens Präteritum Perfekt Plusquamperfekt Futur Gedicht Strophe Vers Reim Metapher "
-                          + "Vergleich Erzählung Märchen Fabel Roman Novelle Autor Erzähler Inhaltsangabe Erörterung "
-                          + "Charakterisierung Interpretation Textanalyse Aufsatz Brief Bericht Rechtschreibung "
-                          + "Grammatik Komma Wortart Satzglied Text Absatz Einleitung Hauptteil Schluss Argument");
-
-                  add("Englisch", "Englisch Vokabeln Übersetzung übersetzen Present Past Simple Continuous "
-                          + "Conditional Passiv Vokabel Aussprache");
-
-                  add("Geschichte", "Mittelalter Antike Steinzeit Römer Griechen Ägypter Pharao Pyramide Kaiser König "
-                          + "Krieg Weltkrieg Revolution Reformation Luther Napoleon Demokratie Diktatur Republik "
-                          + "Kolonialismus Industrialisierung Nationalsozialismus Hitler Holocaust Mauerfall "
-                          + "Wiedervereinigung Kalter Jahrhundert Jahrhunderte Epoche Ritter Burg Kreuzzüge Pest "
-                          + "Französische Kaiserreich Weimarer Bismarck Ursache Folge Quelle");
-
-                  add("Biologie", "Zelle Zellkern Organismus Pflanze Tier Mensch Photosynthese Chlorophyll Atmung "
-                          + "Blut Herz Lunge Niere Leber Gehirn Nerven Skelett Muskel Haut Verdauung Vererbung Gen "
-                          + "Chromosom Evolution Ökosystem Nahrungskette Nahrungsnetz Säugetier Reptil Amphibie "
-                          + "Insekt Vogel Fisch Bakterien Viren Immunsystem Hormon Fortpflanzung Wirbeltier Wald "
-                          + "Biotop Art Lebewesen Stoffwechsel Enzym");
-
-                  add("Physik", "Kraft Masse Gewicht Geschwindigkeit Beschleunigung Energie Arbeit Leistung Druck "
-                          + "Temperatur Wärme Licht Schall Strom Spannung Widerstand Ohm Stromkreis Magnet Elektron "
-                          + "Atom Schwerkraft Gravitation Reibung Hebel Newton Joule Watt Volt Ampere Welle Frequenz "
-                          + "Reflexion Brechung Linse Spiegel Optik Mechanik Dichte Auftrieb");
-
-                  add("Chemie", "Element Verbindung Molekül Atom Periodensystem Säure Base Lauge Salz Reaktion "
-                          + "Oxidation Reduktion Metall Nichtmetall Wasserstoff Sauerstoff Kohlenstoff Stickstoff "
-                          + "Natrium Chlor Eisen Gold Kupfer Ion Bindung Gemisch Lösung Destillation Filtration "
-                          + "Indikator pH Katalysator Brennstoff Verbrennung Formel Gleichung Stoff");
-
-                  add("Erdkunde", "Kontinent Land Staat Hauptstadt Gebirge Fluss Meer Ozean See Insel Wüste "
-                          + "Regenwald Klima Wetter Vulkan Erdbeben Plattentektonik Landwirtschaft Industrie "
-                          + "Bevölkerung Einwohner Karte Maßstab Himalaya Alpen Rhein Donau Europa Asien Afrika "
-                          + "Amerika Australien Antarktis Gletscher Tourismus Rohstoffe Globalisierung");
-
-                  // ---- Aufgaben-Wörter (Operatoren): was soll gemacht werden? ----
-                  task("Rechne Schritt für Schritt und nenne das Ergebnis klar.",
-                          "berechne berechnen rechne rechnen ausrechnen löse lösen bestimme bestimmen ermittle ermitteln");
-                  task("Erkläre es verständlich und mit einem Beispiel.",
-                          "erkläre erklären erläutere erläutern begründe begründen warum wieso weshalb");
-                  task("Beschreibe es sachlich und vollständig.",
-                          "beschreibe beschreiben schildere schildern nenne nennen");
-                  task("Fasse den Inhalt kurz in eigenen Worten zusammen.",
-                          "fasse zusammenfassen zusammenfassung zusammen");
-                  task("Übersetze den Text korrekt und natürlich.",
-                          "übersetze übersetzen übersetzung");
-                  task("Analysiere genau und belege mit Argumenten.",
-                          "analysiere analysieren untersuche untersuchen interpretiere interpretieren vergleiche vergleichen");
-                  task("Schreibe einen gut strukturierten Text mit Einleitung, Hauptteil und Schluss.",
-                          "schreibe schreiben verfasse verfassen erörtere erörtern aufsatz");
-                  task("Korrigiere die Fehler und erkläre kurz die Regel dahinter.",
-                          "korrigiere korrigieren verbessere verbessern fehler");
-                  task("Zeichne oder beschreibe die Skizze in Worten und beschrifte sie.",
-                          "zeichne zeichnen skizziere skizzieren");
+              fun generate(n: Int = 20): String {
+                  val cs = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#\$%&*-_=+?"
+                  val r = SecureRandom()
+                  return (1..n).map { cs[r.nextInt(cs.length)] }.joinToString("")
               }
+          }
 
-              static final String[] SUFFIXE = {"en", "er", "es", "em", "e", "n", "s", "t", "st"};
+          fun FragmentActivity.authenticate(onFail: () -> Unit = {}, onOk: () -> Unit) {
+              val info = BiometricPrompt.PromptInfo.Builder()
+                  .setTitle("GlassVault")
+                  .setSubtitle("Identität bestätigen")
+                  .setAllowedAuthenticators(
+                      BiometricManager.Authenticators.BIOMETRIC_STRONG or
+                              BiometricManager.Authenticators.DEVICE_CREDENTIAL
+                  )
+                  .build()
+              BiometricPrompt(this, ContextCompat.getMainExecutor(this),
+                  object : BiometricPrompt.AuthenticationCallback() {
+                      override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) = onOk()
+                      override fun onAuthenticationError(errorCode: Int, errString: CharSequence) = onFail()
+                  }).authenticate(info)
+          }
+          EOF
 
-              /** Sucht ein Wort im Wortschatz, auch mit einfachen Endungen. */
-              static String lookup(Map<String, String> map, String key) {
-                  String r = map.get(key);
-                  if (r != null) return r;
-                  for (String suf : SUFFIXE) {
-                      if (key.endsWith(suf) && key.length() - suf.length() >= 3) {
-                          String stamm = key.substring(0, key.length() - suf.length());
-                          r = map.get(stamm);
-                          if (r == null) r = map.get(stamm + "e");
-                          if (r == null) r = map.get(stamm + "en");
-                          if (r != null) return r;
-                      }
-                  }
-                  return null;
-              }
+          # ---------- Autofill: erkennt Login-Felder in Apps & Browsern ----------
+          cat > app/src/main/java/com/glassvault/app/Autofill.kt <<'EOF'
+          package com.glassvault.app
 
-              static String join(List<String> l, int max) {
-                  StringBuilder sb = new StringBuilder();
-                  for (int i = 0; i < l.size() && i < max; i++) {
-                      if (i > 0) sb.append(", ");
-                      sb.append(l.get(i));
-                  }
-                  if (l.size() > max) sb.append(" …");
-                  return sb.toString();
-              }
+          import android.app.PendingIntent
+          import android.app.assist.AssistStructure
+          import android.content.Intent
+          import android.os.Bundle
+          import android.os.CancellationSignal
+          import android.service.autofill.*
+          import android.text.InputType
+          import android.view.View
+          import android.view.autofill.AutofillId
+          import android.view.autofill.AutofillManager
+          import android.view.autofill.AutofillValue
+          import android.widget.RemoteViews
+          import androidx.fragment.app.FragmentActivity
 
-              // ----------------- Wort-Erkennung -----------------
-              static class Analyse {
-                  String fach = "Allgemein";
-                  String hinweis = "Beantworte die Aufgabe verständlich und Schritt für Schritt.";
-                  List<String> bekannt = new ArrayList<>();
-                  List<String> unbekannt = new ArrayList<>();
+          class GlassAutofill : AutofillService() {
 
-                  String bericht() {
-                      String r = "Fach: " + fach;
-                      if (!bekannt.isEmpty()) r += "  ·  erkannt: " + join(bekannt, 8);
-                      if (!unbekannt.isEmpty()) r += "\nunbekannt: " + join(unbekannt, 8);
-                      return r;
-                  }
-              }
+              override fun onFillRequest(
+                  request: FillRequest, signal: CancellationSignal, callback: FillCallback
+              ) {
+                  val st = request.fillContexts.last().structure
+                  val pkg = st.activityComponent.packageName
+                  if (pkg == packageName) return callback.onSuccess(null)
 
-              static Analyse analysiere(String text) {
-                  Analyse a = new Analyse();
-                  Map<String, Integer> punkte = new HashMap<>();
-                  LinkedHashSet<String> bekannt = new LinkedHashSet<>();
-                  LinkedHashSet<String> unbekannt = new LinkedHashSet<>();
-                  String hinweis = null;
+                  var user: AutofillId? = null
+                  var pw: AutofillId? = null
+                  var prev: AutofillId? = null
+                  var web: String? = null
 
-                  for (String t : text.split("[^\\p{L}\\p{N}ß]+")) {
-                      if (t.isEmpty() || t.matches("\\d+")) continue;
-                      String key = t.toLowerCase(Locale.GERMAN);
-                      String fach = lookup(LEX, key);
-                      String aufgabe = lookup(TASK, key);
-                      if (fach != null) {
-                          bekannt.add(t);
-                          Integer alt = punkte.get(fach);
-                          punkte.put(fach, alt == null ? 1 : alt + 1);
-                      }
-                      if (aufgabe != null) {
-                          bekannt.add(t);
-                          if (hinweis == null) hinweis = aufgabe;
-                      }
-                      if (fach == null && aufgabe == null) unbekannt.add(t);
-                  }
-                  if (text.matches("(?s).*\\d.*[+\\-*/^=].*")) {
-                      Integer alt = punkte.get("Mathe");
-                      punkte.put("Mathe", alt == null ? 1 : alt + 1);
-                  }
-                  int max = 0;
-                  for (Map.Entry<String, Integer> e : punkte.entrySet()) {
-                      if (e.getValue() > max) {
-                          max = e.getValue();
-                          a.fach = e.getKey();
-                      }
-                  }
-                  if (hinweis != null) a.hinweis = hinweis;
-                  a.bekannt.addAll(bekannt);
-                  a.unbekannt.addAll(unbekannt);
-                  return a;
-              }
-
-              // ----------------- Mini-Taschenrechner (offline) -----------------
-              static class Parser {
-                  final String s;
-                  int i = 0;
-
-                  Parser(String s) { this.s = s.replace(" ", ""); }
-
-                  double parse() {
-                      double v = expr();
-                      if (i < s.length()) throw new RuntimeException("Rest");
-                      return v;
-                  }
-
-                  double expr() {
-                      double v = term();
-                      while (i < s.length()) {
-                          char c = s.charAt(i);
-                          if (c == '+') { i++; v += term(); }
-                          else if (c == '-') { i++; v -= term(); }
-                          else break;
-                      }
-                      return v;
-                  }
-
-                  double term() {
-                      double v = pow();
-                      while (i < s.length()) {
-                          char c = s.charAt(i);
-                          if (c == '*') { i++; v *= pow(); }
-                          else if (c == '/') { i++; v /= pow(); }
-                          else break;
-                      }
-                      return v;
-                  }
-
-                  double pow() {
-                      double b = unary();
-                      if (i < s.length() && s.charAt(i) == '^') { i++; return Math.pow(b, pow()); }
-                      return b;
-                  }
-
-                  double unary() {
-                      if (i < s.length() && s.charAt(i) == '-') { i++; return -unary(); }
-                      return atom();
-                  }
-
-                  double atom() {
-                      if (i < s.length() && s.charAt(i) == '(') {
-                          i++;
-                          double v = expr();
-                          if (i >= s.length() || s.charAt(i) != ')') throw new RuntimeException("Klammer");
-                          i++;
-                          return v;
-                      }
-                      int st = i;
-                      while (i < s.length() && (Character.isDigit(s.charAt(i)) || s.charAt(i) == '.')) i++;
-                      if (st == i) throw new RuntimeException("Zahl");
-                      return Double.parseDouble(s.substring(st, i));
-                  }
-              }
-
-              static String versucheRechnen(String text) {
-                  String t = text.trim();
-                  while (t.endsWith("=") || t.endsWith("?")) t = t.substring(0, t.length() - 1).trim();
-                  if (t.isEmpty() || !t.matches("[0-9+\\-*/().,:xX×÷^ ]+")) return null;
-                  if (!t.matches(".*[+\\-*/:xX×÷^].*")) return null;
-                  t = t.replace(',', '.').replace('x', '*').replace('X', '*')
-                          .replace('×', '*').replace(':', '/').replace('÷', '/');
-                  try {
-                      double v = new Parser(t).parse();
-                      if (Double.isNaN(v) || Double.isInfinite(v)) return "Nicht definiert (Division durch 0?)";
-                      if (v == Math.rint(v) && Math.abs(v) < 1e15) return String.valueOf((long) v);
-                      return String.valueOf(Math.round(v * 1e8) / 1e8);
-                  } catch (Exception e) {
-                      return null;
-                  }
-              }
-
-              // =====================================================
-              //  OBERFLÄCHE: Liquid-Glass-Chat
-              // =====================================================
-              LinearLayout chat, settingsPanel;
-              ScrollView scroll;
-              EditText input, urlIn, modelIn;
-              TextView sendBtn;
-              SharedPreferences prefs;
-              JSONArray history = new JSONArray();
-              boolean busy = false;
-
-              int dp(float v) {
-                  return (int) (v * getResources().getDisplayMetrics().density + 0.5f);
-              }
-
-              /** Glas-Hintergrund: leichter Farbverlauf + heller Rand wie bei Liquid Glass. */
-              GradientDrawable glass(int c1, int c2, float tl, float tr, float br, float bl, int stroke) {
-                  GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{c1, c2});
-                  g.setCornerRadii(new float[]{dp(tl), dp(tl), dp(tr), dp(tr), dp(br), dp(br), dp(bl), dp(bl)});
-                  g.setStroke(dp(1), stroke);
-                  return g;
-              }
-
-              View blob(int color, int gravity, int mx, int my) {
-                  View v = new View(this);
-                  GradientDrawable g = new GradientDrawable();
-                  g.setGradientType(GradientDrawable.RADIAL_GRADIENT);
-                  g.setGradientRadius(dp(170));
-                  g.setColors(new int[]{color, color & 0x00FFFFFF});
-                  v.setBackground(g);
-                  FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(340), dp(340), gravity);
-                  lp.setMargins(dp(mx), dp(my), dp(mx), dp(my));
-                  v.setLayoutParams(lp);
-                  return v;
-              }
-
-              TextView pill(String text, float size) {
-                  TextView t = new TextView(this);
-                  t.setText(text);
-                  t.setTextSize(size);
-                  t.setTextColor(Color.WHITE);
-                  t.setGravity(Gravity.CENTER);
-                  t.setPadding(dp(14), dp(8), dp(14), dp(8));
-                  t.setBackground(glass(0x44FFFFFF, 0x1AFFFFFF, 20, 20, 20, 20, 0x66FFFFFF));
-                  return t;
-              }
-
-              @Override
-              protected void onCreate(Bundle b) {
-                  super.onCreate(b);
-                  prefs = getSharedPreferences("hausi", MODE_PRIVATE);
-                  getWindow().setStatusBarColor(0xFF0B1020);
-                  getWindow().setNavigationBarColor(0xFF0C2B4A);
-
-                  FrameLayout root = new FrameLayout(this);
-                  root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                          new int[]{0xFF0B1020, 0xFF1B1347, 0xFF0C2B4A}));
-                  root.addView(blob(0x99FF4FA3, Gravity.TOP | Gravity.START, -110, 40));
-                  root.addView(blob(0x8838D6FF, Gravity.CENTER_VERTICAL | Gravity.END, -140, 0));
-                  root.addView(blob(0x887B5CFF, Gravity.BOTTOM | Gravity.START, -100, 60));
-
-                  LinearLayout col = new LinearLayout(this);
-                  col.setOrientation(LinearLayout.VERTICAL);
-                  root.addView(col, new FrameLayout.LayoutParams(
-                          ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-
-                  // ---- Kopfzeile ----
-                  LinearLayout header = new LinearLayout(this);
-                  header.setOrientation(LinearLayout.HORIZONTAL);
-                  header.setGravity(Gravity.CENTER_VERTICAL);
-                  header.setPadding(dp(18), dp(12), dp(12), dp(12));
-                  header.setBackground(glass(0x40FFFFFF, 0x14FFFFFF, 26, 26, 26, 26, 0x66FFFFFF));
-
-                  LinearLayout titles = new LinearLayout(this);
-                  titles.setOrientation(LinearLayout.VERTICAL);
-                  TextView title = new TextView(this);
-                  title.setText("Hausi");
-                  title.setTextColor(Color.WHITE);
-                  title.setTextSize(22);
-                  title.setTypeface(Typeface.DEFAULT_BOLD);
-                  TextView sub = new TextView(this);
-                  sub.setText("Hausaufgabenhelfer · Ollama");
-                  sub.setTextColor(0xB3FFFFFF);
-                  sub.setTextSize(12);
-                  titles.addView(title);
-                  titles.addView(sub);
-                  header.addView(titles, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-                  TextView gear = pill("⚙", 18);
-                  gear.setOnClickListener(v -> settingsPanel.setVisibility(
-                          settingsPanel.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE));
-                  header.addView(gear);
-
-                  LinearLayout.LayoutParams hlp = new LinearLayout.LayoutParams(
-                          ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                  hlp.setMargins(dp(12), dp(10), dp(12), dp(4));
-                  col.addView(header, hlp);
-
-                  // ---- Einstellungen (ausklappbar) ----
-                  settingsPanel = new LinearLayout(this);
-                  settingsPanel.setOrientation(LinearLayout.VERTICAL);
-                  settingsPanel.setPadding(dp(16), dp(10), dp(16), dp(12));
-                  settingsPanel.setBackground(glass(0x33FFFFFF, 0x10FFFFFF, 22, 22, 22, 22, 0x55FFFFFF));
-                  settingsPanel.setVisibility(View.GONE);
-
-                  urlIn = settingField("Ollama-Adresse", prefs.getString("url", "http://127.0.0.1:11434"));
-                  modelIn = settingField("Modell", prefs.getString("model", "llama3.2:1b"));
-                  settingsPanel.addView(urlIn);
-                  settingsPanel.addView(modelIn);
-                  TextView clear = pill("Chat leeren", 14);
-                  clear.setOnClickListener(v -> {
-                      history = new JSONArray();
-                      chat.removeAllViews();
-                      willkommen();
-                      settingsPanel.setVisibility(View.GONE);
-                  });
-                  LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
-                          ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                  clp.topMargin = dp(8);
-                  settingsPanel.addView(clear, clp);
-
-                  LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
-                          ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                  slp.setMargins(dp(12), dp(4), dp(12), dp(4));
-                  col.addView(settingsPanel, slp);
-
-                  // ---- Chatverlauf ----
-                  scroll = new ScrollView(this);
-                  scroll.setVerticalScrollBarEnabled(false);
-                  chat = new LinearLayout(this);
-                  chat.setOrientation(LinearLayout.VERTICAL);
-                  chat.setPadding(dp(12), dp(8), dp(12), dp(8));
-                  scroll.addView(chat, new ViewGroup.LayoutParams(
-                          ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-                  scroll.addOnLayoutChangeListener((v, l, t, r, bt, ol, ot, or2, ob) -> {
-                      if (bt - t < ob - ot) scrollDown();
-                  });
-                  col.addView(scroll, new LinearLayout.LayoutParams(
-                          ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
-
-                  // ---- Eingabeleiste ----
-                  LinearLayout bar = new LinearLayout(this);
-                  bar.setOrientation(LinearLayout.HORIZONTAL);
-                  bar.setGravity(Gravity.CENTER_VERTICAL);
-                  bar.setPadding(dp(16), dp(6), dp(8), dp(6));
-                  bar.setBackground(glass(0x44FFFFFF, 0x16FFFFFF, 28, 28, 28, 28, 0x77FFFFFF));
-
-                  input = new EditText(this);
-                  input.setHint("Aufgabe eintippen …");
-                  input.setHintTextColor(0x99FFFFFF);
-                  input.setTextColor(Color.WHITE);
-                  input.setTextSize(16);
-                  input.setBackground(null);
-                  input.setMaxLines(5);
-                  input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
-                          | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
-                  bar.addView(input, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-                  sendBtn = new TextView(this);
-                  sendBtn.setText("➤");
-                  sendBtn.setTextSize(18);
-                  sendBtn.setTextColor(Color.WHITE);
-                  sendBtn.setGravity(Gravity.CENTER);
-                  GradientDrawable sg = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                          new int[]{0xFF6AA8FF, 0xFF7B5CFF});
-                  sg.setShape(GradientDrawable.OVAL);
-                  sg.setStroke(dp(1), 0x99FFFFFF);
-                  sendBtn.setBackground(sg);
-                  sendBtn.setOnClickListener(v -> senden());
-                  bar.addView(sendBtn, new LinearLayout.LayoutParams(dp(46), dp(46)));
-
-                  LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
-                          ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                  blp.setMargins(dp(12), dp(4), dp(12), dp(12));
-                  col.addView(bar, blp);
-
-                  setContentView(root);
-                  willkommen();
-              }
-
-              EditText settingField(String hint, String value) {
-                  EditText e = new EditText(this);
-                  e.setHint(hint);
-                  e.setText(value);
-                  e.setSingleLine(true);
-                  e.setTextColor(Color.WHITE);
-                  e.setHintTextColor(0x99FFFFFF);
-                  e.setTextSize(15);
-                  return e;
-              }
-
-              void willkommen() {
-                  addBubble("Hallo! 👋 Ich bin Hausi. Schreib mir deine Aufgabe – ich erkenne das Fach und "
-                          + "löse sie mit Ollama. Rechenaufgaben wie (3+4)*2 rechne ich sofort offline.", 0);
-              }
-
-              void scrollDown() {
-                  scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
-              }
-
-              /** kind: 0 = Hausi, 1 = ich, 2 = Analyse-Chip */
-              TextView addBubble(String text, int kind) {
-                  TextView tv = new TextView(this);
-                  tv.setText(text);
-                  tv.setTextColor(kind == 2 ? 0xD9FFFFFF : Color.WHITE);
-                  tv.setTextSize(kind == 2 ? 12 : 16);
-                  tv.setLineSpacing(0, 1.12f);
-                  tv.setTextIsSelectable(true);
-                  tv.setMaxWidth((int) (getResources().getDisplayMetrics().widthPixels * 0.82f));
-                  tv.setPadding(dp(15), dp(10), dp(15), dp(10));
-
-                  LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                          ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                  lp.setMargins(0, dp(4), 0, dp(4));
-
-                  if (kind == 1) {
-                      tv.setBackground(glass(0xAA6AA8FF, 0x777B5CFF, 22, 22, 6, 22, 0x99FFFFFF));
-                      lp.gravity = Gravity.END;
-                  } else if (kind == 2) {
-                      tv.setBackground(glass(0x28FFFFFF, 0x0DFFFFFF, 14, 14, 14, 14, 0x44FFFFFF));
-                      lp.gravity = Gravity.END;
-                  } else {
-                      tv.setBackground(glass(0x48FFFFFF, 0x18FFFFFF, 22, 22, 22, 6, 0x77FFFFFF));
-                      lp.gravity = Gravity.START;
-                  }
-                  chat.addView(tv, lp);
-
-                  tv.setAlpha(0f);
-                  tv.setTranslationY(dp(14));
-                  tv.animate().alpha(1f).translationY(0f).setDuration(260).start();
-                  scrollDown();
-                  return tv;
-              }
-
-              JSONObject msg(String role, String content) {
-                  JSONObject o = new JSONObject();
-                  try {
-                      o.put("role", role);
-                      o.put("content", content);
-                  } catch (Exception ignored) {
-                  }
-                  return o;
-              }
-
-              // ----------------- Senden -----------------
-              void senden() {
-                  if (busy) return;
-                  final String text = input.getText().toString().trim();
-                  if (text.isEmpty()) return;
-                  input.setText("");
-
-                  addBubble(text, 1);
-                  final Analyse a = analysiere(text);
-                  addBubble(a.bericht(), 2);
-
-                  // Reine Rechenaufgabe? Dann sofort offline lösen.
-                  String lokal = versucheRechnen(text);
-                  if (lokal != null) {
-                      addBubble("= " + lokal + "\n(offline berechnet)", 0);
-                      return;
-                  }
-
-                  final String basis = urlIn.getText().toString().trim().replaceAll("/+$", "");
-                  final String modell = modelIn.getText().toString().trim();
-                  prefs.edit().putString("url", basis).putString("model", modell).apply();
-
-                  final String angereichert = "Fach: " + a.fach + "\n"
-                          + "Anweisung: " + a.hinweis + "\n"
-                          + (a.bekannt.isEmpty() ? "" : "Wichtige Schlüsselwörter: " + join(a.bekannt, 12) + "\n")
-                          + "\nAufgabe:\n" + text;
-                  history.put(msg("user", angereichert));
-
-                  final JSONArray nachrichten = new JSONArray();
-                  nachrichten.put(msg("system", "Du bist Hausi, ein freundlicher Hausaufgabenhelfer für Schüler. "
-                          + "Antworte immer auf Deutsch, klar, Schritt für Schritt und nicht zu lang."));
-                  int start = Math.max(0, history.length() - 12);
-                  for (int i = start; i < history.length(); i++) nachrichten.put(history.optJSONObject(i));
-
-                  busy = true;
-                  sendBtn.setAlpha(0.5f);
-                  final TextView tippt = addBubble("Hausi denkt nach …", 0);
-                  final ObjectAnimator puls = ObjectAnimator.ofFloat(tippt, "alpha", 1f, 0.35f);
-                  puls.setDuration(700);
-                  puls.setRepeatCount(ValueAnimator.INFINITE);
-                  puls.setRepeatMode(ValueAnimator.REVERSE);
-                  puls.setStartDelay(300);
-                  puls.start();
-
-                  new Thread(() -> {
-                      String antwort;
-                      boolean ok = true;
-                      try {
-                          antwort = frageOllama(basis, modell, nachrichten);
-                      } catch (Exception e) {
-                          ok = false;
-                          antwort = "Verbindung zu Ollama fehlgeschlagen.\n\n"
-                                  + "Prüfe in Termux:\n"
-                                  + "1) ollama serve  (muss laufen)\n"
-                                  + "2) ollama pull " + modell + "\n"
-                                  + "3) Adresse: http://127.0.0.1:11434\n\n"
-                                  + "Fehler: " + e.getMessage();
-                      }
-                      final String fertig = antwort;
-                      final boolean erfolg = ok;
-                      runOnUiThread(() -> {
-                          puls.cancel();
-                          tippt.setAlpha(1f);
-                          tippt.setText(fertig);
-                          if (erfolg) {
-                              history.put(msg("assistant", fertig));
-                          } else if (history.length() > 0) {
-                              history.remove(history.length() - 1);
+                  fun walk(n: AssistStructure.ViewNode) {
+                      if (web == null && !n.webDomain.isNullOrBlank()) web = n.webDomain
+                      val id = n.autofillId
+                      if (id != null && n.autofillType == View.AUTOFILL_TYPE_TEXT) {
+                          val hints = n.autofillHints?.map { it.lowercase() }.orEmpty()
+                          val isText = (n.inputType and InputType.TYPE_MASK_CLASS) == InputType.TYPE_CLASS_TEXT
+                          val v = n.inputType and InputType.TYPE_MASK_VARIATION
+                          val isPw = hints.any { it.contains("password") } || (isText && (
+                                  v == InputType.TYPE_TEXT_VARIATION_PASSWORD ||
+                                  v == InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD ||
+                                  v == InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD))
+                          if (isPw) {
+                              if (pw == null) pw = id
+                          } else if (pw == null) {
+                              if (user == null && hints.any { it == "username" || it.contains("email") }) user = id
+                              prev = id
                           }
-                          busy = false;
-                          sendBtn.setAlpha(1f);
-                          scrollDown();
-                      });
-                  }).start();
+                      }
+                      for (i in 0 until n.childCount) walk(n.getChildAt(i))
+                  }
+                  for (i in 0 until st.windowNodeCount) walk(st.getWindowNodeAt(i).rootViewNode)
+
+                  val pwId = pw ?: return callback.onSuccess(null)
+                  val userId = user ?: prev
+                  val domain = web
+                  val isWeb = domain != null
+                  val host = domain ?: pkg
+
+                  val matches = try { Vault.match(Vault.load(this), host, isWeb) } catch (e: Exception) { emptyList() }
+                  if (matches.isEmpty()) return callback.onSuccess(null)
+
+                  val intent = Intent(this, AuthActivity::class.java)
+                      .putExtra("user", userId).putExtra("pw", pwId)
+                      .putExtra("host", host).putExtra("web", isWeb)
+                  val pi = PendingIntent.getActivity(
+                      this, 1001, intent, PendingIntent.FLAG_CANCEL_CURRENT or PendingIntent.FLAG_MUTABLE
+                  )
+                  val pres = RemoteViews(packageName, R.layout.af_item).apply {
+                      setTextViewText(R.id.t, "GlassVault · ${matches.size} Zugang/Zugänge für $host")
+                  }
+                  val ids = listOfNotNull(userId, pwId).toTypedArray()
+                  callback.onSuccess(
+                      FillResponse.Builder().setAuthentication(ids, pi.intentSender, pres).build()
+                  )
               }
 
-              // ----------------- Ollama-Verbindung -----------------
-              static String frageOllama(String basis, String modell, JSONArray nachrichten) throws Exception {
-                  JSONObject body = new JSONObject();
-                  body.put("model", modell);
-                  body.put("messages", nachrichten);
-                  body.put("stream", false);
+              override fun onSaveRequest(request: SaveRequest, callback: SaveCallback) = callback.onSuccess()
+          }
 
-                  HttpURLConnection c = (HttpURLConnection) new URL(basis + "/api/chat").openConnection();
-                  c.setRequestMethod("POST");
-                  c.setConnectTimeout(8000);
-                  c.setReadTimeout(300000);
-                  c.setDoOutput(true);
-                  c.setRequestProperty("Content-Type", "application/json");
-                  try (OutputStream os = c.getOutputStream()) {
-                      os.write(body.toString().getBytes(StandardCharsets.UTF_8));
-                  }
+          /** Biometrie-Abfrage bei JEDEM Ausfüllen – erst danach werden Daten herausgegeben. */
+          class AuthActivity : FragmentActivity() {
+              @Suppress("DEPRECATION")
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  window.setFlags(
+                      android.view.WindowManager.LayoutParams.FLAG_SECURE,
+                      android.view.WindowManager.LayoutParams.FLAG_SECURE
+                  )
+                  val user = intent.getParcelableExtra<AutofillId>("user")
+                  val pw = intent.getParcelableExtra<AutofillId>("pw")
+                  val host = intent.getStringExtra("host") ?: ""
+                  val web = intent.getBooleanExtra("web", false)
+                  if (pw == null) { finish(); return }
 
-                  int code = c.getResponseCode();
-                  InputStream is = code >= 400 ? c.getErrorStream() : c.getInputStream();
-                  StringBuilder sb = new StringBuilder();
-                  try (BufferedReader r = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
-                      String line;
-                      while ((line = r.readLine()) != null) sb.append(line);
+                  authenticate(onFail = { setResult(RESULT_CANCELED); finish() }) {
+                      val matches = Vault.match(Vault.load(this), host, web)
+                      if (matches.isEmpty()) {
+                          setResult(RESULT_CANCELED)
+                      } else {
+                          val resp = FillResponse.Builder()
+                          matches.forEach { e ->
+                              val pres = RemoteViews(packageName, R.layout.af_item).apply {
+                                  setTextViewText(R.id.t, "${e.title} · ${e.user}")
+                              }
+                              val ds = Dataset.Builder(pres)
+                              user?.let { ds.setValue(it, AutofillValue.forText(e.user)) }
+                              ds.setValue(pw, AutofillValue.forText(e.secret))
+                              resp.addDataset(ds.build())
+                          }
+                          setResult(
+                              RESULT_OK,
+                              Intent().putExtra(AutofillManager.EXTRA_AUTHENTICATION_RESULT, resp.build())
+                          )
+                      }
+                      finish()
                   }
-                  if (code >= 400) throw new Exception("HTTP " + code + ": " + sb);
-                  JSONObject antwort = new JSONObject(sb.toString());
-                  return antwort.getJSONObject("message").optString("content", "(keine Antwort)").trim();
+              }
+          }
+          EOF
+
+          # ---------- Quick-Settings-Kachel -> Wallet ----------
+          cat > app/src/main/java/com/glassvault/app/WalletTile.kt <<'EOF'
+          package com.glassvault.app
+
+          import android.app.PendingIntent
+          import android.content.Intent
+          import android.os.Build
+          import android.service.quicksettings.Tile
+          import android.service.quicksettings.TileService
+
+          class WalletTile : TileService() {
+              override fun onStartListening() {
+                  qsTile?.apply { state = Tile.STATE_INACTIVE; label = "Wallet"; updateTile() }
+              }
+
+              @Suppress("DEPRECATION")
+              override fun onClick() {
+                  val i = Intent(this, MainActivity::class.java)
+                      .putExtra("tab", 1).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                  if (Build.VERSION.SDK_INT >= 34) {
+                      startActivityAndCollapse(
+                          PendingIntent.getActivity(this, 0, i, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+                      )
+                  } else startActivityAndCollapse(i)
+              }
+          }
+          EOF
+
+          # ---------- UI: Glass-Design ----------
+          cat > app/src/main/java/com/glassvault/app/MainActivity.kt <<'EOF'
+          package com.glassvault.app
+
+          import android.content.ClipData
+          import android.content.ClipboardManager
+          import android.content.Context
+          import android.content.Intent
+          import android.os.Bundle
+          import android.os.Handler
+          import android.os.Looper
+          import android.os.PersistableBundle
+          import android.view.WindowManager
+          import android.widget.Toast
+          import androidx.activity.compose.setContent
+          import androidx.compose.foundation.*
+          import androidx.compose.foundation.layout.*
+          import androidx.compose.foundation.lazy.LazyColumn
+          import androidx.compose.foundation.lazy.items
+          import androidx.compose.foundation.shape.CircleShape
+          import androidx.compose.foundation.shape.RoundedCornerShape
+          import androidx.compose.foundation.text.KeyboardOptions
+          import androidx.compose.material3.*
+          import androidx.compose.runtime.*
+          import androidx.compose.ui.Alignment
+          import androidx.compose.ui.Modifier
+          import androidx.compose.ui.draw.clip
+          import androidx.compose.ui.graphics.Brush
+          import androidx.compose.ui.graphics.Color
+          import androidx.compose.ui.platform.LocalContext
+          import androidx.compose.ui.res.painterResource
+          import androidx.compose.ui.text.font.FontFamily
+          import androidx.compose.ui.text.font.FontWeight
+          import androidx.compose.ui.text.input.KeyboardType
+          import androidx.compose.ui.text.input.PasswordVisualTransformation
+          import androidx.compose.ui.text.input.VisualTransformation
+          import androidx.compose.ui.unit.Dp
+          import androidx.compose.ui.unit.dp
+          import androidx.compose.ui.unit.sp
+          import androidx.compose.ui.window.Dialog
+          import androidx.compose.ui.window.DialogProperties
+          import androidx.fragment.app.FragmentActivity
+          import java.util.UUID
+
+          class MainActivity : FragmentActivity() {
+              private var unlocked by mutableStateOf(false)
+              private var tabReq by mutableIntStateOf(0)
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  // Kein Screenshot / keine Vorschau im App-Switcher
+                  window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
+                  tabReq = intent.getIntExtra("tab", 0)
+                  setContent {
+                      GlassTheme {
+                          if (unlocked) Home(tabReq) { unlocked = false }
+                          else LockScreen { unlock() }
+                      }
+                  }
+              }
+
+              override fun onNewIntent(intent: Intent) {
+                  super.onNewIntent(intent)
+                  tabReq = intent.getIntExtra("tab", 0)
+              }
+
+              override fun onStart() { super.onStart(); if (!unlocked) unlock() }
+
+              // Auto-Lock: sobald die App in den Hintergrund geht
+              override fun onStop() { super.onStop(); unlocked = false }
+
+              private fun unlock() = authenticate { unlocked = true }
+          }
+
+          // ---------- Theme & Helfer ----------
+          val Accent = Color(0xFF8B8DFF)
+          val Dim = Color(0x99FFFFFF)
+
+          @Composable
+          fun GlassTheme(content: @Composable () -> Unit) =
+              MaterialTheme(colorScheme = darkColorScheme(primary = Accent), content = content)
+
+          fun Modifier.glass(r: Dp = 24.dp, base: Color = Color.Transparent): Modifier {
+              val s = RoundedCornerShape(r)
+              return this.clip(s)
+                  .background(base)
+                  .background(Brush.linearGradient(listOf(Color(0x2EFFFFFF), Color(0x0DFFFFFF))))
+                  .border(1.dp, Brush.linearGradient(listOf(Color(0x66FFFFFF), Color(0x0FFFFFFF))), s)
+          }
+
+          fun copy(ctx: Context, text: String) {
+              val cm = ctx.getSystemService(ClipboardManager::class.java)
+              val clip = ClipData.newPlainText("gv", text)
+              clip.description.extras = PersistableBundle().apply {
+                  putBoolean("android.content.extra.IS_SENSITIVE", true)
+              }
+              cm.setPrimaryClip(clip)
+              Handler(Looper.getMainLooper()).postDelayed({ try { cm.clearPrimaryClip() } catch (_: Exception) {} }, 30_000)
+              Toast.makeText(ctx, "Kopiert · wird in 30 s gelöscht", Toast.LENGTH_SHORT).show()
+          }
+
+          @Composable
+          fun Background() {
+              Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFF0B1020), Color(0xFF1A1040), Color(0xFF0B1020))))) {
+                  Box(Modifier.size(340.dp).offset((-120).dp, (-60).dp)
+                      .background(Brush.radialGradient(listOf(Color(0x884F46E5), Color.Transparent))))
+                  Box(Modifier.size(320.dp).align(Alignment.BottomEnd).offset(100.dp, 80.dp)
+                      .background(Brush.radialGradient(listOf(Color(0x667C3AED), Color.Transparent))))
+              }
+          }
+
+          @Composable
+          fun Logo(size: Dp) {
+              Box(
+                  Modifier.size(size).clip(RoundedCornerShape(size * 0.3f))
+                      .background(Brush.linearGradient(listOf(Color(0xFF6366F1), Color(0xFF8B5CF6)))),
+                  contentAlignment = Alignment.Center
+              ) {
+                  Image(painterResource(R.drawable.ic_logo_fg), null, Modifier.requiredSize(size * 1.6f))
+              }
+          }
+
+          @Composable
+          fun GButton(text: String, accent: Boolean = false, onClick: () -> Unit) {
+              val bg = if (accent) Brush.linearGradient(listOf(Color(0xFF6366F1), Color(0xFF8B5CF6)))
+              else Brush.linearGradient(listOf(Color(0x33FFFFFF), Color(0x1AFFFFFF)))
+              Box(
+                  Modifier.clip(RoundedCornerShape(14.dp)).background(bg).clickable(onClick = onClick)
+                      .padding(horizontal = 14.dp, vertical = 10.dp),
+                  contentAlignment = Alignment.Center
+              ) { Text(text, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium) }
+          }
+
+          @Composable
+          fun Field(v: String, on: (String) -> Unit, label: String, kb: KeyboardType = KeyboardType.Text, mask: Boolean = false) {
+              OutlinedTextField(
+                  value = v, onValueChange = on, label = { Text(label) }, singleLine = true,
+                  modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp),
+                  visualTransformation = if (mask) PasswordVisualTransformation() else VisualTransformation.None,
+                  keyboardOptions = KeyboardOptions(keyboardType = kb),
+                  colors = OutlinedTextFieldDefaults.colors(
+                      focusedTextColor = Color.White, unfocusedTextColor = Color.White,
+                      focusedBorderColor = Accent, unfocusedBorderColor = Color(0x33FFFFFF),
+                      focusedLabelColor = Accent, unfocusedLabelColor = Dim, cursorColor = Color.White
+                  )
+              )
+          }
+
+          // ---------- Screens ----------
+          @Composable
+          fun LockScreen(onUnlock: () -> Unit) {
+              Box(Modifier.fillMaxSize()) {
+                  Background()
+                  Column(
+                      Modifier.fillMaxSize().padding(32.dp),
+                      horizontalAlignment = Alignment.CenterHorizontally,
+                      verticalArrangement = Arrangement.Center
+                  ) {
+                      Logo(104.dp)
+                      Spacer(Modifier.height(24.dp))
+                      Text("GlassVault", color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold)
+                      Text("Dein Tresor ist gesperrt", color = Dim, fontSize = 14.sp)
+                      Spacer(Modifier.height(32.dp))
+                      GButton("Entsperren", accent = true, onClick = onUnlock)
+                  }
+              }
+          }
+
+          @Composable
+          fun Home(startTab: Int, onLock: () -> Unit) {
+              val ctx = LocalContext.current
+              val all = remember { mutableStateListOf<Entry>().apply { addAll(Vault.load(ctx)) } }
+              var tab by remember(startTab) { mutableIntStateOf(startTab) }
+              var q by remember { mutableStateOf("") }
+              var add by remember { mutableStateOf(false) }
+              var open by remember { mutableStateOf<String?>(null) }
+              val type = if (tab == 0) "login" else "card"
+              val shown = all.filter {
+                  it.type == type && (q.isBlank() || it.title.contains(q, true) || it.user.contains(q, true))
+              }
+              fun persist() = Vault.save(ctx, all.toList())
+
+              Box(Modifier.fillMaxSize()) {
+                  Background()
+                  Column(Modifier.fillMaxSize().systemBarsPadding().padding(horizontal = 20.dp, vertical = 16.dp)) {
+                      Row(verticalAlignment = Alignment.CenterVertically) {
+                          Logo(44.dp)
+                          Spacer(Modifier.width(12.dp))
+                          Column(Modifier.weight(1f)) {
+                              Text("GlassVault", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                              Text("${all.size} Einträge · AES-256-GCM", color = Dim, fontSize = 12.sp)
+                          }
+                          GButton("Sperren", onClick = onLock)
+                      }
+                      Spacer(Modifier.height(20.dp))
+                      Row(Modifier.fillMaxWidth().glass(18.dp).padding(4.dp)) {
+                          listOf("Passwörter", "Wallet").forEachIndexed { i, s ->
+                              Box(
+                                  Modifier.weight(1f).clip(RoundedCornerShape(14.dp))
+                                      .background(if (tab == i) Color(0x33FFFFFF) else Color.Transparent)
+                                      .clickable { tab = i; open = null }.padding(vertical = 10.dp),
+                                  contentAlignment = Alignment.Center
+                              ) {
+                                  Text(s, color = Color.White, fontWeight = if (tab == i) FontWeight.SemiBold else FontWeight.Normal)
+                              }
+                          }
+                      }
+                      Spacer(Modifier.height(14.dp))
+                      Field(q, { q = it }, "Suchen")
+                      Spacer(Modifier.height(14.dp))
+                      if (shown.isEmpty()) {
+                          Box(Modifier.fillMaxWidth().padding(top = 60.dp), contentAlignment = Alignment.Center) {
+                              Text(
+                                  if (tab == 0) "Noch keine Passwörter.\nTippe auf + zum Hinzufügen." else "Noch keine Karten.\nTippe auf + zum Hinzufügen.",
+                                  color = Dim
+                              )
+                          }
+                      }
+                      LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(bottom = 100.dp)) {
+                          items(shown, key = { it.id }) { e ->
+                              val isOpen = open == e.id
+                              val toggle = { open = if (isOpen) null else e.id }
+                              val del = { all.remove(e); persist(); open = null }
+                              if (e.type == "login") LoginItem(e, isOpen, toggle, del) else CardItem(e, isOpen, toggle, del)
+                          }
+                      }
+                  }
+                  Box(
+                      Modifier.align(Alignment.BottomEnd).padding(24.dp).size(62.dp).clip(CircleShape)
+                          .background(Brush.linearGradient(listOf(Color(0xFF6366F1), Color(0xFF8B5CF6))))
+                          .clickable { add = true },
+                      contentAlignment = Alignment.Center
+                  ) { Text("+", color = Color.White, fontSize = 30.sp) }
+              }
+
+              if (add) AddDialog(type, { add = false }) { e ->
+                  all.add(0, e); persist(); add = false
+              }
+          }
+
+          @Composable
+          fun LoginItem(e: Entry, open: Boolean, toggle: () -> Unit, del: () -> Unit) {
+              val ctx = LocalContext.current
+              var show by remember { mutableStateOf(false) }
+              Column(Modifier.fillMaxWidth().glass().clickable(onClick = toggle).padding(16.dp)) {
+                  Row(verticalAlignment = Alignment.CenterVertically) {
+                      Box(
+                          Modifier.size(44.dp).clip(CircleShape)
+                              .background(Brush.linearGradient(listOf(Color(0xFF6366F1), Color(0xFF8B5CF6)))),
+                          contentAlignment = Alignment.Center
+                      ) { Text(e.title.take(1).uppercase(), color = Color.White, fontWeight = FontWeight.Bold) }
+                      Spacer(Modifier.width(14.dp))
+                      Column {
+                          Text(e.title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                          Text(e.user, color = Dim, fontSize = 13.sp)
+                      }
+                  }
+                  if (open) {
+                      Spacer(Modifier.height(14.dp))
+                      Text(
+                          if (show) e.secret else "•".repeat(minOf(e.secret.length, 20)),
+                          color = Color.White, fontFamily = FontFamily.Monospace, fontSize = 15.sp
+                      )
+                      Spacer(Modifier.height(12.dp))
+                      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                          GButton("Benutzer") { copy(ctx, e.user) }
+                          GButton("Passwort", accent = true) { copy(ctx, e.secret) }
+                          GButton(if (show) "Verbergen" else "Zeigen") { show = !show }
+                          GButton("Löschen", onClick = del)
+                      }
+                  }
+              }
+          }
+
+          @Composable
+          fun CardItem(e: Entry, open: Boolean, toggle: () -> Unit, del: () -> Unit) {
+              val ctx = LocalContext.current
+              val parts = e.extra.split("|")
+              val exp = parts.getOrElse(0) { "" }
+              val cvv = parts.getOrElse(1) { "" }
+              val digits = e.secret.filter { it.isDigit() }
+              val numText = if (open) digits.chunked(4).joinToString(" ")
+              else "••••  ••••  ••••  " + digits.takeLast(4)
+              val s = RoundedCornerShape(24.dp)
+              Column {
+                  Column(
+                      Modifier.fillMaxWidth().aspectRatio(1.6f).clip(s)
+                          .background(Brush.linearGradient(listOf(Color(0xFF4F46E5), Color(0xFF9333EA), Color(0xFF0EA5E9))))
+                          .border(1.dp, Color(0x55FFFFFF), s).clickable(onClick = toggle).padding(20.dp),
+                      verticalArrangement = Arrangement.SpaceBetween
+                  ) {
+                      Text(e.title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                      Text(numText, color = Color.White, fontFamily = FontFamily.Monospace, fontSize = 19.sp, letterSpacing = 1.sp)
+                      Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                          Column {
+                              Text("INHABER", color = Dim, fontSize = 10.sp)
+                              Text(e.user.uppercase(), color = Color.White, fontSize = 13.sp)
+                          }
+                          Column {
+                              Text("GÜLTIG BIS", color = Dim, fontSize = 10.sp)
+                              Text(exp, color = Color.White, fontSize = 13.sp)
+                          }
+                          if (open) Column {
+                              Text("CVV", color = Dim, fontSize = 10.sp)
+                              Text(cvv, color = Color.White, fontSize = 13.sp)
+                          }
+                      }
+                  }
+                  if (open) {
+                      Spacer(Modifier.height(10.dp))
+                      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                          GButton("Nummer", accent = true) { copy(ctx, digits) }
+                          GButton("CVV") { copy(ctx, cvv) }
+                          GButton("Löschen", onClick = del)
+                      }
+                  }
+              }
+          }
+
+          @Composable
+          fun AddDialog(type: String, onDismiss: () -> Unit, onSave: (Entry) -> Unit) {
+              var t by remember { mutableStateOf("") }
+              var u by remember { mutableStateOf("") }
+              var s by remember { mutableStateOf("") }
+              var x by remember { mutableStateOf("") }
+              var c by remember { mutableStateOf("") }
+              val login = type == "login"
+              Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+                  Column(
+                      Modifier.padding(20.dp).fillMaxWidth().glass(28.dp, Color(0xFF141A36))
+                          .verticalScroll(rememberScrollState()).padding(20.dp),
+                      verticalArrangement = Arrangement.spacedBy(12.dp)
+                  ) {
+                      Text(if (login) "Neues Passwort" else "Neue Karte", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                      if (login) {
+                          Field(t, { t = it }, "Website / App (z. B. netflix.com)", KeyboardType.Uri)
+                          Field(u, { u = it }, "Benutzername / E-Mail", KeyboardType.Email)
+                          Field(s, { s = it }, "Passwort")
+                          GButton("Sicheres Passwort generieren") { s = Vault.generate() }
+                      } else {
+                          Field(t, { t = it }, "Kartenname (z. B. Visa)")
+                          Field(u, { u = it }, "Karteninhaber")
+                          Field(s, { s = it }, "Kartennummer", KeyboardType.Number)
+                          Field(x, { x = it }, "Gültig bis (MM/YY)", KeyboardType.Number)
+                          Field(c, { c = it }, "CVV", KeyboardType.NumberPassword, mask = true)
+                      }
+                      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                          GButton("Abbrechen", onClick = onDismiss)
+                          GButton("Speichern", accent = true) {
+                              if (t.isNotBlank() && s.isNotBlank()) {
+                                  onSave(Entry(UUID.randomUUID().toString(), type, t.trim(), u.trim(), s, if (login) "" else "${x.trim()}|${c.trim()}"))
+                              }
+                          }
+                      }
+                  }
               }
           }
           EOF
@@ -742,8 +831,7 @@ jobs:
       - name: APK bauen
         run: gradle assembleDebug --no-daemon
 
-      - name: APK hochladen
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: Hausi-APK
+          name: GlassVault-APK
           path: app/build/outputs/apk/debug/app-debug.apk

@@ -368,7 +368,9 @@ jobs:
               val v = n.inputType and InputType.TYPE_MASK_VARIATION
               if (v == InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS || v == InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS) return true
               val rx = Regex("user|mail|login")
-              return n.htmlInfo?.attributes?.any { (k, a) ->
+              return n.htmlInfo?.attributes?.any { attr ->
+                  val k: String = attr.first
+                  val a: String = attr.second
                   (k == "type" && a == "email") ||
                       ((k == "name" || k == "id" || k == "autocomplete") && rx.containsMatchIn(a.lowercase()))
               } == true

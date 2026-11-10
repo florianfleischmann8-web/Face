@@ -404,7 +404,7 @@ jobs:
               return p
           }
 
-          private fun inline(spec: InlinePresentationSpec?, title: String, sub: String, attr: PendingIntent): InlinePresentation? {
+          private fun inlinePres(spec: InlinePresentationSpec?, title: String, sub: String, attr: PendingIntent): InlinePresentation? {
               if (spec == null || !UiVersions.getVersions(spec.style).contains(UiVersions.INLINE_UI_VERSION_1)) return null
               val ui = InlineSuggestionUi.newContentBuilder(attr).setTitle(title).setSubtitle(sub).build()
               return InlinePresentation(ui.slice, spec, false)
@@ -438,7 +438,7 @@ jobs:
                       }
                       val ds = Dataset.Builder(pres)
                       ids.forEach { ds.setValue(it, null) }
-                      inline(specs.getOrElse(i) { specs.lastOrNull() }, label, "GlassVault", attr)?.let { ds.setInlinePresentation(it) }
+                      inlinePres(specs.getOrNull(i) ?: specs.lastOrNull(), label, "GlassVault", attr)?.let { ds.setInlinePresentation(it) }
                       ds.setAuthentication(pi.intentSender)
                       resp.addDataset(ds.build())
                   }
@@ -899,7 +899,12 @@ jobs:
           EOF
 
       - name: APK bauen
-        run: gradle assembleDebug --no-daemon
+        shell: bash
+        run: gradle assembleDebug --no-daemon --console=plain 2>&1 | tee build.log
+
+      - name: Fehlerübersicht
+        if: failure()
+        run: grep -E "^e: |What went wrong|error:" -A2 build.log | head -40 || true
 
       - uses: actions/upload-artifact@v4
         with:

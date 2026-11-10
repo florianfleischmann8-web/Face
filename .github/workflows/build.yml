@@ -474,7 +474,7 @@ jobs:
                           else list.add(0, Entry(UUID.randomUUID().toString(), "login", title, p.userTxt, p.pwTxt, ""))
                           Vault.save(this, list)
                       }
-                  } catch (_: Exception) { }
+                  } catch (e: Exception) { }
                   callback.onSuccess()
               }
           }
@@ -636,7 +636,7 @@ jobs:
                   putBoolean("android.content.extra.IS_SENSITIVE", true)
               }
               cm.setPrimaryClip(clip)
-              Handler(Looper.getMainLooper()).postDelayed({ try { cm.clearPrimaryClip() } catch (_: Exception) {} }, 30_000)
+              Handler(Looper.getMainLooper()).postDelayed({ try { cm.clearPrimaryClip() } catch (e: Exception) {} }, 30_000)
               Toast.makeText(ctx, "Kopiert · wird in 30 s gelöscht", Toast.LENGTH_SHORT).show()
           }
 

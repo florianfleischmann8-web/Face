@@ -82,6 +82,7 @@ jobs:
               implementation("androidx.core:core-ktx:1.13.1")
               implementation("androidx.fragment:fragment-ktx:1.7.1")
               implementation("androidx.biometric:biometric:1.1.0")
+              implementation("androidx.autofill:autofill:1.1.0")
           }
           EOF
 
@@ -291,7 +292,17 @@ jobs:
                       val h = host.lowercase().removePrefix("www.")
                       if (t.isBlank()) false
                       else if (web) h == t || h.endsWith(".$t")
-                      else h.contains(t.substringBefore("."))
+                      else t.substringBefore(".").filter { it.isLetterOrDigit() }.let { b -> b.length >= 3 && h.contains(b) }
+                  }
+              }
+
+              /** auth.gmx.net -> gmx.net, shop.example.co.uk -> example.co.uk */
+              fun baseDomain(host: String): String {
+                  val parts = host.lowercase().removePrefix("www.").split(".")
+                  return when {
+                      parts.size <= 2 -> parts.joinToString(".")
+                      parts[parts.size - 2].length <= 3 && parts.last().length == 2 -> parts.takeLast(3).joinToString(".")
+                      else -> parts.takeLast(2).joinToString(".")
                   }
               }
 
@@ -335,72 +346,140 @@ jobs:
           import android.view.autofill.AutofillManager
           import android.view.autofill.AutofillValue
           import android.widget.RemoteViews
+          import android.widget.inline.InlinePresentationSpec
+          import androidx.autofill.inline.UiVersions
+          import androidx.autofill.inline.v1.InlineSuggestionUi
           import androidx.fragment.app.FragmentActivity
+          import java.util.UUID
+
+          private class Parsed(val pkg: String) {
+              var user: AutofillId? = null
+              var pw: AutofillId? = null
+              var userTxt = ""
+              var pwTxt = ""
+              var web: String? = null
+          }
+
+          private fun txt(n: AssistStructure.ViewNode): String =
+              n.autofillValue?.takeIf { it.isText }?.textValue?.toString().orEmpty()
+
+          private fun isUserField(n: AssistStructure.ViewNode, hints: List<String>): Boolean {
+              if (hints.any { it == "username" || it.contains("email") }) return true
+              val v = n.inputType and InputType.TYPE_MASK_VARIATION
+              if (v == InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS || v == InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS) return true
+              val rx = Regex("user|mail|login")
+              return n.htmlInfo?.attributes?.any { (k, a) ->
+                  (k == "type" && a == "email") ||
+                      ((k == "name" || k == "id" || k == "autocomplete") && rx.containsMatchIn(a.lowercase()))
+              } == true
+          }
+
+          /** Findet Benutzername- und Passwortfeld (auch bei 2-stufigen Logins wie GMX: erst nur E-Mail). */
+          private fun parse(st: AssistStructure): Parsed {
+              val p = Parsed(st.activityComponent.packageName)
+              var prev: AssistStructure.ViewNode? = null
+              fun walk(n: AssistStructure.ViewNode) {
+                  if (p.web == null && !n.webDomain.isNullOrBlank()) p.web = n.webDomain
+                  val id = n.autofillId
+                  if (id != null && n.autofillType == View.AUTOFILL_TYPE_TEXT) {
+                      val hints = n.autofillHints?.map { it.lowercase() }.orEmpty()
+                      val isText = (n.inputType and InputType.TYPE_MASK_CLASS) == InputType.TYPE_CLASS_TEXT
+                      val v = n.inputType and InputType.TYPE_MASK_VARIATION
+                      val isPw = hints.any { it.contains("password") } || (isText && (
+                          v == InputType.TYPE_TEXT_VARIATION_PASSWORD ||
+                          v == InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD ||
+                          v == InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD))
+                      if (isPw) {
+                          if (p.pw == null) { p.pw = id; p.pwTxt = txt(n) }
+                      } else if (p.pw == null) {
+                          if (p.user == null && isUserField(n, hints)) { p.user = id; p.userTxt = txt(n) }
+                          prev = n
+                      }
+                  }
+                  for (i in 0 until n.childCount) walk(n.getChildAt(i))
+              }
+              for (i in 0 until st.windowNodeCount) walk(st.getWindowNodeAt(i).rootViewNode)
+              val pr = prev
+              if (p.user == null && p.pw != null && pr != null) { p.user = pr.autofillId; p.userTxt = txt(pr) }
+              return p
+          }
+
+          private fun inline(spec: InlinePresentationSpec?, title: String, sub: String, attr: PendingIntent): InlinePresentation? {
+              if (spec == null || !UiVersions.getVersions(spec.style).contains(UiVersions.INLINE_UI_VERSION_1)) return null
+              val ui = InlineSuggestionUi.newContentBuilder(attr).setTitle(title).setSubtitle(sub).build()
+              return InlinePresentation(ui.slice, spec, false)
+          }
 
           class GlassAutofill : AutofillService() {
 
-              override fun onFillRequest(
-                  request: FillRequest, signal: CancellationSignal, callback: FillCallback
-              ) {
-                  val st = request.fillContexts.last().structure
-                  val pkg = st.activityComponent.packageName
-                  if (pkg == packageName) return callback.onSuccess(null)
+              @Suppress("DEPRECATION")
+              override fun onFillRequest(request: FillRequest, signal: CancellationSignal, callback: FillCallback) {
+                  val p = parse(request.fillContexts.last().structure)
+                  if (p.pkg == packageName || (p.pw == null && p.user == null)) return callback.onSuccess(null)
 
-                  var user: AutofillId? = null
-                  var pw: AutofillId? = null
-                  var prev: AutofillId? = null
-                  var web: String? = null
+                  val isWeb = p.web != null
+                  val host = p.web ?: p.pkg
+                  val matches = try { Vault.match(Vault.load(this), host, isWeb).take(5) } catch (e: Exception) { emptyList() }
+                  val ids = listOfNotNull(p.user, p.pw)
+                  val specs = request.inlineSuggestionsRequest?.inlinePresentationSpecs.orEmpty()
+                  val attr = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
+                  val resp = FillResponse.Builder()
 
-                  fun walk(n: AssistStructure.ViewNode) {
-                      if (web == null && !n.webDomain.isNullOrBlank()) web = n.webDomain
-                      val id = n.autofillId
-                      if (id != null && n.autofillType == View.AUTOFILL_TYPE_TEXT) {
-                          val hints = n.autofillHints?.map { it.lowercase() }.orEmpty()
-                          val isText = (n.inputType and InputType.TYPE_MASK_CLASS) == InputType.TYPE_CLASS_TEXT
-                          val v = n.inputType and InputType.TYPE_MASK_VARIATION
-                          val isPw = hints.any { it.contains("password") } || (isText && (
-                                  v == InputType.TYPE_TEXT_VARIATION_PASSWORD ||
-                                  v == InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD ||
-                                  v == InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD))
-                          if (isPw) {
-                              if (pw == null) pw = id
-                          } else if (pw == null) {
-                              if (user == null && hints.any { it == "username" || it.contains("email") }) user = id
-                              prev = id
-                          }
+                  // Ein Vorschlag pro gespeichertem Zugang – Daten werden erst nach Biometrie herausgegeben
+                  matches.forEachIndexed { i, e ->
+                      val intent = Intent(this, AuthActivity::class.java)
+                          .putExtra("eid", e.id).putExtra("user", p.user).putExtra("pw", p.pw)
+                      val pi = PendingIntent.getActivity(
+                          this, e.id.hashCode(), intent, PendingIntent.FLAG_CANCEL_CURRENT or PendingIntent.FLAG_MUTABLE
+                      )
+                      val label = if (e.user.isNotBlank()) e.user else e.title
+                      val pres = RemoteViews(packageName, R.layout.af_item).apply {
+                          setTextViewText(R.id.t, "GlassVault · $label")
                       }
-                      for (i in 0 until n.childCount) walk(n.getChildAt(i))
+                      val ds = Dataset.Builder(pres)
+                      ids.forEach { ds.setValue(it, null) }
+                      inline(specs.getOrElse(i) { specs.lastOrNull() }, label, "GlassVault", attr)?.let { ds.setInlinePresentation(it) }
+                      ds.setAuthentication(pi.intentSender)
+                      resp.addDataset(ds.build())
                   }
-                  for (i in 0 until st.windowNodeCount) walk(st.getWindowNodeAt(i).rootViewNode)
 
-                  val pwId = pw ?: return callback.onSuccess(null)
-                  val userId = user ?: prev
-                  val domain = web
-                  val isWeb = domain != null
-                  val host = domain ?: pkg
-
-                  val matches = try { Vault.match(Vault.load(this), host, isWeb) } catch (e: Exception) { emptyList() }
-                  if (matches.isEmpty()) return callback.onSuccess(null)
-
-                  val intent = Intent(this, AuthActivity::class.java)
-                      .putExtra("user", userId).putExtra("pw", pwId)
-                      .putExtra("host", host).putExtra("web", isWeb)
-                  val pi = PendingIntent.getActivity(
-                      this, 1001, intent, PendingIntent.FLAG_CANCEL_CURRENT or PendingIntent.FLAG_MUTABLE
-                  )
-                  val pres = RemoteViews(packageName, R.layout.af_item).apply {
-                      setTextViewText(R.id.t, "GlassVault · ${matches.size} Zugang/Zugänge für $host")
+                  // Unbekannte Seite/App -> Android fragt nach dem Absenden "Speichern?"
+                  val pwId = p.pw
+                  if (pwId != null) {
+                      val sb = SaveInfo.Builder(
+                          SaveInfo.SAVE_DATA_TYPE_PASSWORD or SaveInfo.SAVE_DATA_TYPE_USERNAME, arrayOf(pwId)
+                      )
+                      p.user?.let { sb.setOptionalIds(arrayOf(it)) }
+                      sb.setFlags(SaveInfo.FLAG_SAVE_ON_ALL_VIEWS_INVISIBLE)
+                      resp.setSaveInfo(sb.build())
                   }
-                  val ids = listOfNotNull(userId, pwId).toTypedArray()
-                  callback.onSuccess(
-                      FillResponse.Builder().setAuthentication(ids, pi.intentSender, pres).build()
-                  )
+                  if (matches.isEmpty() && pwId == null) return callback.onSuccess(null)
+                  callback.onSuccess(resp.build())
               }
 
-              override fun onSaveRequest(request: SaveRequest, callback: SaveCallback) = callback.onSuccess()
+              override fun onSaveRequest(request: SaveRequest, callback: SaveCallback) {
+                  try {
+                      val p = parse(request.fillContexts.last().structure)
+                      if (p.pwTxt.isNotBlank()) {
+                          val w = p.web
+                          val isWeb = w != null
+                          val parts = p.pkg.split(".")
+                          val title = if (w != null) Vault.baseDomain(w) else if (parts.size >= 3) parts[1] else parts[0]
+                          val list = Vault.load(this).toMutableList()
+                          val idx = list.indexOfFirst {
+                              it.type == "login" && it.user.equals(p.userTxt, true) &&
+                                  Vault.match(listOf(it), w ?: p.pkg, isWeb).isNotEmpty()
+                          }
+                          if (idx >= 0) list[idx] = list[idx].copy(secret = p.pwTxt)
+                          else list.add(0, Entry(UUID.randomUUID().toString(), "login", title, p.userTxt, p.pwTxt, ""))
+                          Vault.save(this, list)
+                      }
+                  } catch (_: Exception) { }
+                  callback.onSuccess()
+              }
           }
 
-          /** Biometrie-Abfrage bei JEDEM Ausfüllen – erst danach werden Daten herausgegeben. */
+          /** Biometrie-Abfrage bei JEDEM Ausfüllen – erst danach wird der Eintrag herausgegeben. */
           class AuthActivity : FragmentActivity() {
               @Suppress("DEPRECATION")
               override fun onCreate(savedInstanceState: Bundle?) {
@@ -411,29 +490,20 @@ jobs:
                   )
                   val user = intent.getParcelableExtra<AutofillId>("user")
                   val pw = intent.getParcelableExtra<AutofillId>("pw")
-                  val host = intent.getStringExtra("host") ?: ""
-                  val web = intent.getBooleanExtra("web", false)
-                  if (pw == null) { finish(); return }
+                  val eid = intent.getStringExtra("eid")
 
                   authenticate(onFail = { setResult(RESULT_CANCELED); finish() }) {
-                      val matches = Vault.match(Vault.load(this), host, web)
-                      if (matches.isEmpty()) {
+                      val e = Vault.load(this).firstOrNull { it.id == eid }
+                      if (e == null) {
                           setResult(RESULT_CANCELED)
                       } else {
-                          val resp = FillResponse.Builder()
-                          matches.forEach { e ->
-                              val pres = RemoteViews(packageName, R.layout.af_item).apply {
-                                  setTextViewText(R.id.t, "${e.title} · ${e.user}")
-                              }
-                              val ds = Dataset.Builder(pres)
-                              user?.let { ds.setValue(it, AutofillValue.forText(e.user)) }
-                              ds.setValue(pw, AutofillValue.forText(e.secret))
-                              resp.addDataset(ds.build())
+                          val pres = RemoteViews(packageName, R.layout.af_item).apply {
+                              setTextViewText(R.id.t, e.title)
                           }
-                          setResult(
-                              RESULT_OK,
-                              Intent().putExtra(AutofillManager.EXTRA_AUTHENTICATION_RESULT, resp.build())
-                          )
+                          val ds = Dataset.Builder(pres)
+                          user?.let { ds.setValue(it, AutofillValue.forText(e.user)) }
+                          pw?.let { ds.setValue(it, AutofillValue.forText(e.secret)) }
+                          setResult(RESULT_OK, Intent().putExtra(AutofillManager.EXTRA_AUTHENTICATION_RESULT, ds.build()))
                       }
                       finish()
                   }

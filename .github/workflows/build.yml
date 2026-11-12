@@ -1,9 +1,8 @@
-name: Build GlassVault
+name: Build Lens APK
 
-# Ablegen als: .github/workflows/build.yml  (Repo leer lassen, nur diese Datei!)
 on:
   push:
-    branches: [main]
+    branches: [main, master]
   workflow_dispatch:
 
 jobs:
@@ -15,901 +14,846 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          java-version: '17'
 
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: subosito/flutter-action@v2
         with:
-          gradle-version: 8.7
+          channel: stable
+          cache: true
 
-      - name: Projekt erzeugen (kompletter Code)
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Projekt erzeugen
         run: |
-          mkdir -p app/src/main/java/com/glassvault/app
-          mkdir -p app/src/main/res/{values,drawable,layout,mipmap-anydpi,xml}
+          flutter create --org com.lens --project-name lens_search --platforms android app
+          cd app
+          rm -rf test
+          flutter pub add camera google_mlkit_image_labeling image url_launcher
 
-          cat > settings.gradle.kts <<'EOF'
-          pluginManagement {
-              repositories { google(); mavenCentral(); gradlePluginPortal() }
-          }
-          dependencyResolutionManagement {
-              repositories { google(); mavenCentral() }
-          }
-          rootProject.name = "GlassVault"
-          include(":app")
-          EOF
+      - name: Android konfigurieren (minSdk, Kamera-Rechte, Name)
+        working-directory: app
+        run: |
+          sed -i 's/flutter.minSdkVersion/23/' android/app/build.gradle*
+          sed -i 's|<application|<uses-permission android:name="android.permission.CAMERA"/>\n    <application|' android/app/src/main/AndroidManifest.xml
+          sed -i 's|android:label="[^"]*"|android:label="Lens"|' android/app/src/main/AndroidManifest.xml
 
-          cat > build.gradle.kts <<'EOF'
-          plugins {
-              id("com.android.application") version "8.5.2" apply false
-              id("org.jetbrains.kotlin.android") version "1.9.24" apply false
-          }
-          EOF
+      - name: Logo / App-Icon generieren
+        working-directory: app
+        run: |
+          python3 -m pip install pillow
+          python3 - <<'PY'
+          import math
+          from PIL import Image, ImageDraw, ImageFilter
 
-          cat > gradle.properties <<'EOF'
-          org.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8
-          android.useAndroidX=true
-          kotlin.code.style=official
-          EOF
+          S = 1024
 
-          cat > app/build.gradle.kts <<'EOF'
-          plugins {
-              id("com.android.application")
-              id("org.jetbrains.kotlin.android")
-          }
-          android {
-              namespace = "com.glassvault.app"
-              compileSdk = 34
-              defaultConfig {
-                  applicationId = "com.glassvault.app"
-                  minSdk = 30
-                  targetSdk = 34
-                  versionCode = 1
-                  versionName = "1.0"
-              }
-              compileOptions {
-                  sourceCompatibility = JavaVersion.VERSION_17
-                  targetCompatibility = JavaVersion.VERSION_17
-              }
-              kotlinOptions { jvmTarget = "17" }
-              buildFeatures { compose = true }
-              composeOptions { kotlinCompilerExtensionVersion = "1.5.14" }
-          }
-          dependencies {
-              implementation(platform("androidx.compose:compose-bom:2024.06.00"))
-              implementation("androidx.compose.ui:ui")
-              implementation("androidx.compose.foundation:foundation")
-              implementation("androidx.compose.material3:material3")
-              implementation("androidx.activity:activity-compose:1.9.0")
-              implementation("androidx.core:core-ktx:1.13.1")
-              implementation("androidx.fragment:fragment-ktx:1.7.1")
-              implementation("androidx.biometric:biometric:1.1.0")
-              implementation("androidx.autofill:autofill:1.1.0")
-          }
-          EOF
+          def mix(c1, c2, mask):
+              return Image.composite(Image.new('RGB', (S, S), c2),
+                                     Image.new('RGB', (S, S), c1), mask)
 
-          cat > app/src/main/AndroidManifest.xml <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              <uses-permission android:name="android.permission.USE_BIOMETRIC" />
-              <application
-                  android:label="GlassVault"
-                  android:icon="@mipmap/ic_launcher"
-                  android:roundIcon="@mipmap/ic_launcher"
-                  android:theme="@style/Theme.Glass"
-                  android:allowBackup="false">
+          vert = Image.linear_gradient('L').resize((S, S))
+          horiz = Image.linear_gradient('L').rotate(90).resize((S, S))
 
-                  <activity
-                      android:name=".MainActivity"
-                      android:exported="true"
-                      android:launchMode="singleTask">
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN" />
-                          <category android:name="android.intent.category.LAUNCHER" />
-                      </intent-filter>
-                  </activity>
+          bg = mix((10, 8, 28), (58, 22, 120), vert)
+          ring_col = mix((53, 224, 255), (255, 79, 216), horiz)
 
-                  <activity
-                      android:name=".AuthActivity"
-                      android:exported="false"
-                      android:excludeFromRecents="true"
-                      android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+          m = Image.new('L', (S, S), 0)
+          d = ImageDraw.Draw(m)
+          R, W = 290, 84
+          d.arc([512 - R, 512 - R, 512 + R, 512 + R], start=40, end=320, fill=255, width=W)
+          for ang in (40, 320):
+              x = 512 + R * math.cos(math.radians(ang))
+              y = 512 + R * math.sin(math.radians(ang))
+              d.ellipse([x - W / 2, y - W / 2, x + W / 2, y + W / 2], fill=255)
 
-                  <service
-                      android:name=".GlassAutofill"
-                      android:exported="true"
-                      android:label="GlassVault"
-                      android:permission="android.permission.BIND_AUTOFILL_SERVICE">
-                      <intent-filter>
-                          <action android:name="android.service.autofill.AutofillService" />
-                      </intent-filter>
-                      <meta-data
-                          android:name="android.autofill"
-                          android:resource="@xml/autofill_config" />
-                  </service>
+          glow = m.filter(ImageFilter.GaussianBlur(46)).point(lambda v: int(v * 0.6))
+          bg = Image.composite(Image.new('RGB', (S, S), (130, 90, 255)), bg, glow)
+          bg = Image.composite(ring_col, bg, m)
 
-                  <service
-                      android:name=".WalletTile"
-                      android:exported="true"
-                      android:label="Wallet"
-                      android:icon="@drawable/ic_logo_fg"
-                      android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
-                      <intent-filter>
-                          <action android:name="android.service.quicksettings.action.QS_TILE" />
-                      </intent-filter>
-                  </service>
-              </application>
-          </manifest>
-          EOF
+          s = 130
+          cx = cy = 512
+          k = 0.2
+          star = [(cx, cy - s), (cx + s * k, cy - s * k), (cx + s, cy), (cx + s * k, cy + s * k),
+                  (cx, cy + s), (cx - s * k, cy + s * k), (cx - s, cy), (cx - s * k, cy - s * k)]
+          ImageDraw.Draw(bg).polygon(star, fill=(255, 255, 255))
 
-          cat > app/src/main/res/xml/autofill_config.xml <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <autofill-service xmlns:android="http://schemas.android.com/apk/res/android" />
-          EOF
+          mask = Image.new('L', (S, S), 0)
+          ImageDraw.Draw(mask).rounded_rectangle([0, 0, S - 1, S - 1], radius=230, fill=255)
+          icon = bg.convert('RGBA')
+          icon.putalpha(mask)
 
-          cat > app/src/main/res/values/themes.xml <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <resources>
-              <style name="Theme.Glass" parent="android:Theme.Material.NoActionBar">
-                  <item name="android:windowBackground">#0B1020</item>
-                  <item name="android:statusBarColor">#0B1020</item>
-                  <item name="android:navigationBarColor">#0B1020</item>
-              </style>
-          </resources>
-          EOF
+          sizes = {'mdpi': 48, 'hdpi': 72, 'xhdpi': 96, 'xxhdpi': 144, 'xxxhdpi': 192}
+          for name, px in sizes.items():
+              icon.resize((px, px), Image.LANCZOS).save(
+                  f'android/app/src/main/res/mipmap-{name}/ic_launcher.png')
+          PY
 
-          cat > app/src/main/res/layout/af_item.xml <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-              android:layout_width="match_parent"
-              android:layout_height="wrap_content"
-              android:padding="12dp">
-              <TextView
-                  android:id="@+id/t"
-                  android:layout_width="wrap_content"
-                  android:layout_height="wrap_content"
-                  android:textSize="14sp" />
-          </LinearLayout>
-          EOF
+      - name: App-Code schreiben
+        working-directory: app
+        run: |
+          cat > lib/main.dart <<'EOF'
+          import 'dart:io';
+          import 'dart:math' as math;
+          import 'dart:ui' as ui;
+          import 'package:camera/camera.dart';
+          import 'package:flutter/material.dart';
+          import 'package:flutter/services.dart';
+          import 'package:google_mlkit_image_labeling/google_mlkit_image_labeling.dart';
+          import 'package:image/image.dart' as img;
+          import 'package:url_launcher/url_launcher.dart';
 
-          # ---------- Logo: Schild mit Schlüsselloch ----------
-          cat > app/src/main/res/drawable/ic_logo_fg.xml <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="108dp" android:height="108dp"
-              android:viewportWidth="108" android:viewportHeight="108">
-              <path
-                  android:fillColor="#FFFFFF"
-                  android:pathData="M54,30 L72,37 L72,52 C72,63 64,72 54,76 C44,72 36,63 36,52 L36,37 Z" />
-              <path
-                  android:fillColor="#4F46E5"
-                  android:pathData="M54,45 a4,4 0 1,1 0,8 a4,4 0 1,1 0,-8 Z M52.5,52 L55.5,52 L56.5,62 L51.5,62 Z" />
-          </vector>
-          EOF
+          const cCyan = Color(0xFF35E0FF);
+          const cViolet = Color(0xFF8B5CFF);
+          const cPink = Color(0xFFFF4FD8);
+          const cBg = Color(0xFF07070F);
 
-          cat > app/src/main/res/drawable/ic_logo_bg.xml <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <shape xmlns:android="http://schemas.android.com/apk/res/android">
-              <gradient android:angle="315" android:startColor="#6366F1" android:endColor="#8B5CF6" />
-          </shape>
-          EOF
+          Color wh(int a) => Color.fromARGB(a, 255, 255, 255);
 
-          cat > app/src/main/res/mipmap-anydpi/ic_launcher.xml <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-              <background android:drawable="@drawable/ic_logo_bg" />
-              <foreground android:drawable="@drawable/ic_logo_fg" />
-              <monochrome android:drawable="@drawable/ic_logo_fg" />
-          </adaptive-icon>
-          EOF
+          List<CameraDescription> cams = [];
 
-          # ---------- Verschlüsselung + Biometrie ----------
-          cat > app/src/main/java/com/glassvault/app/Vault.kt <<'EOF'
-          package com.glassvault.app
+          const Map<String, String> de = {
+            'Shoe': 'Schuhe', 'Footwear': 'Schuhe', 'Sneakers': 'Sneaker', 'Sandal': 'Sandalen',
+            'Boot': 'Stiefel', 'Laptop': 'Laptop', 'Computer': 'Computer', 'Netbook': 'Laptop',
+            'Mobile phone': 'Smartphone', 'Phone': 'Smartphone', 'Smartphone': 'Smartphone',
+            'Watch': 'Armbanduhr', 'Clock': 'Uhr', 'Chair': 'Stuhl', 'Table': 'Tisch',
+            'Couch': 'Sofa', 'Bed': 'Bett', 'Bottle': 'Flasche', 'Water bottle': 'Trinkflasche',
+            'Cup': 'Tasse', 'Mug': 'Tasse', 'Backpack': 'Rucksack', 'Bag': 'Tasche',
+            'Handbag': 'Handtasche', 'Sunglasses': 'Sonnenbrille', 'Glasses': 'Brille',
+            'Headphones': 'Kopfhörer', 'Camera': 'Kamera', 'Keyboard': 'Tastatur',
+            'Computer keyboard': 'Tastatur', 'Computer mouse': 'Computermaus', 'Mouse': 'Computermaus',
+            'Lamp': 'Lampe', 'Bicycle': 'Fahrrad', 'Car': 'Auto', 'Plant': 'Pflanze',
+            'Houseplant': 'Zimmerpflanze', 'Flowerpot': 'Blumentopf', 'Book': 'Buch',
+            'Jacket': 'Jacke', 'Jeans': 'Jeans', 'Dress': 'Kleid', 'Hat': 'Hut', 'Cap': 'Kappe',
+            'Pen': 'Stift', 'Television': 'Fernseher', 'Monitor': 'Monitor', 'Toy': 'Spielzeug',
+            'Guitar': 'Gitarre', 'Wheel': 'Rad', 'Tire': 'Reifen', 'Shirt': 'Shirt',
+            'T-shirt': 'T-Shirt', 'Speaker': 'Lautsprecher', 'Tableware': 'Geschirr',
+            'Vase': 'Vase', 'Pillow': 'Kissen', 'Fork': 'Gabel', 'Spoon': 'Löffel',
+            'Knife': 'Messer', 'Wallet': 'Geldbeutel', 'Tablet computer': 'Tablet',
+            'Tablet': 'Tablet', 'Drink': 'Getränk', 'Coffee cup': 'Kaffeetasse',
+            'Pants': 'Hose', 'Trousers': 'Hose', 'Sock': 'Socken', 'Scarf': 'Schal',
+            'Ring': 'Ring', 'Necklace': 'Halskette', 'Jewellery': 'Schmuck', 'Perfume': 'Parfüm',
+            'Cosmetics': 'Kosmetik', 'Tool': 'Werkzeug', 'Drill': 'Bohrmaschine',
+            'Candle': 'Kerze', 'Mirror': 'Spiegel', 'Umbrella': 'Regenschirm',
+          };
 
-          import android.content.Context
-          import android.security.keystore.KeyGenParameterSpec
-          import android.security.keystore.KeyProperties
-          import androidx.biometric.BiometricManager
-          import androidx.biometric.BiometricPrompt
-          import androidx.core.content.ContextCompat
-          import androidx.fragment.app.FragmentActivity
-          import org.json.JSONArray
-          import org.json.JSONObject
-          import java.io.File
-          import java.security.KeyStore
-          import java.security.SecureRandom
-          import javax.crypto.Cipher
-          import javax.crypto.KeyGenerator
-          import javax.crypto.SecretKey
-          import javax.crypto.spec.GCMParameterSpec
+          const Set<String> generic = {
+            'Product', 'Material property', 'Font', 'Rectangle', 'Pattern', 'Circle', 'Line',
+            'Text', 'Metal', 'Plastic', 'Textile', 'Glass', 'Wood', 'Gas', 'Electric blue',
+            'Black', 'White', 'Red', 'Blue', 'Grey', 'Tints and shades', 'Automotive design',
+            'Fashion accessory', 'Event', 'Technology', 'Gadget', 'Electronic device',
+            'Parallel', 'Symmetry', 'Sleeve', 'Sky', 'Cloud', 'Entertainment', 'Art', 'Design',
+            'Thumb', 'Finger', 'Hand', 'Skin', 'Flesh', 'Nail', 'Leg', 'Arm', 'Joint', 'Neck',
+            'Fashion', 'Happy', 'Smile', 'Room', 'Building', 'Facade', 'Shadow', 'Aluminium',
+          };
 
-          /** type = "login" (title=Website/App, user, secret=Passwort) oder "card" (secret=Nummer, extra="MM/YY|CVV") */
-          data class Entry(
-              val id: String, val type: String, val title: String,
-              val user: String, val secret: String, val extra: String
-          )
-
-          object Vault {
-              private const val ALIAS = "glassvault_master_v1"
-
-              // AES-256-GCM Schlüssel liegt im Android Keystore (hardwaregestützt, nicht exportierbar)
-              private fun key(): SecretKey {
-                  val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-                  (ks.getKey(ALIAS, null) as? SecretKey)?.let { return it }
-                  val kg = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
-                  kg.init(
-                      KeyGenParameterSpec.Builder(
-                          ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
-                      )
-                          .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                          .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                          .setKeySize(256)
-                          .build()
-                  )
-                  return kg.generateKey()
-              }
-
-              private fun file(c: Context) = File(c.filesDir, "vault.bin")
-
-              fun load(c: Context): List<Entry> {
-                  val f = file(c)
-                  if (!f.exists()) return emptyList()
-                  val raw = f.readBytes()
-                  val iv = raw.copyOfRange(0, 12)
-                  val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-                  cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, iv))
-                  val json = String(cipher.doFinal(raw, 12, raw.size - 12), Charsets.UTF_8)
-                  val arr = JSONArray(json)
-                  return (0 until arr.length()).map {
-                      val o = arr.getJSONObject(it)
-                      Entry(
-                          o.getString("id"), o.getString("type"), o.getString("title"),
-                          o.getString("user"), o.getString("secret"), o.getString("extra")
-                      )
-                  }
-              }
-
-              fun save(c: Context, list: List<Entry>) {
-                  val arr = JSONArray()
-                  list.forEach {
-                      arr.put(
-                          JSONObject().put("id", it.id).put("type", it.type).put("title", it.title)
-                              .put("user", it.user).put("secret", it.secret).put("extra", it.extra)
-                      )
-                  }
-                  val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-                  cipher.init(Cipher.ENCRYPT_MODE, key()) // Keystore erzeugt zufälligen IV
-                  val enc = cipher.doFinal(arr.toString().toByteArray(Charsets.UTF_8))
-                  val tmp = File(c.filesDir, "vault.tmp")
-                  tmp.writeBytes(cipher.iv + enc)
-                  tmp.renameTo(file(c)) // atomar
-              }
-
-              /** Strikt: Web nur exakte Domain/Subdomain (Phishing-Schutz), Apps per Paketname. */
-              fun match(l: List<Entry>, host: String, web: Boolean): List<Entry> = l.filter { e ->
-                  e.type == "login" && run {
-                      val t = e.title.lowercase().trim().removePrefix("https://").removePrefix("http://")
-                          .removePrefix("www.").substringBefore("/")
-                      val h = host.lowercase().removePrefix("www.")
-                      if (t.isBlank()) false
-                      else if (web) h == t || h.endsWith(".$t")
-                      else t.substringBefore(".").filter { it.isLetterOrDigit() }.let { b -> b.length >= 3 && h.contains(b) }
-                  }
-              }
-
-              /** auth.gmx.net -> gmx.net, shop.example.co.uk -> example.co.uk */
-              fun baseDomain(host: String): String {
-                  val parts = host.lowercase().removePrefix("www.").split(".")
-                  return when {
-                      parts.size <= 2 -> parts.joinToString(".")
-                      parts[parts.size - 2].length <= 3 && parts.last().length == 2 -> parts.takeLast(3).joinToString(".")
-                      else -> parts.takeLast(2).joinToString(".")
-                  }
-              }
-
-              fun generate(n: Int = 20): String {
-                  val cs = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#\$%&*-_=+?"
-                  val r = SecureRandom()
-                  return (1..n).map { cs[r.nextInt(cs.length)] }.joinToString("")
-              }
+          Future<void> main() async {
+            WidgetsFlutterBinding.ensureInitialized();
+            await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+            SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+            SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+              statusBarColor: Colors.transparent,
+              systemNavigationBarColor: Colors.transparent,
+              statusBarIconBrightness: Brightness.light,
+              systemNavigationBarIconBrightness: Brightness.light,
+            ));
+            try {
+              cams = await availableCameras();
+            } catch (_) {
+              cams = [];
+            }
+            runApp(const LensApp());
           }
 
-          fun FragmentActivity.authenticate(onFail: () -> Unit = {}, onOk: () -> Unit) {
-              val info = BiometricPrompt.PromptInfo.Builder()
-                  .setTitle("GlassVault")
-                  .setSubtitle("Identität bestätigen")
-                  .setAllowedAuthenticators(
-                      BiometricManager.Authenticators.BIOMETRIC_STRONG or
-                              BiometricManager.Authenticators.DEVICE_CREDENTIAL
-                  )
-                  .build()
-              BiometricPrompt(this, ContextCompat.getMainExecutor(this),
-                  object : BiometricPrompt.AuthenticationCallback() {
-                      override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) = onOk()
-                      override fun onAuthenticationError(errorCode: Int, errString: CharSequence) = onFail()
-                  }).authenticate(info)
-          }
-          EOF
-
-          # ---------- Autofill: erkennt Login-Felder in Apps & Browsern ----------
-          cat > app/src/main/java/com/glassvault/app/Autofill.kt <<'EOF'
-          package com.glassvault.app
-
-          import android.app.PendingIntent
-          import android.app.assist.AssistStructure
-          import android.content.Intent
-          import android.os.Bundle
-          import android.os.CancellationSignal
-          import android.service.autofill.*
-          import android.text.InputType
-          import android.view.View
-          import android.view.autofill.AutofillId
-          import android.view.autofill.AutofillManager
-          import android.view.autofill.AutofillValue
-          import android.widget.RemoteViews
-          import android.widget.inline.InlinePresentationSpec
-          import androidx.autofill.inline.UiVersions
-          import androidx.autofill.inline.v1.InlineSuggestionUi
-          import androidx.fragment.app.FragmentActivity
-          import java.util.UUID
-
-          private class Parsed(val pkg: String) {
-              var user: AutofillId? = null
-              var pw: AutofillId? = null
-              var userTxt = ""
-              var pwTxt = ""
-              var web: String? = null
+          class LensApp extends StatelessWidget {
+            const LensApp({super.key});
+            @override
+            Widget build(BuildContext context) {
+              return MaterialApp(
+                title: 'Lens',
+                debugShowCheckedModeBanner: false,
+                theme: ThemeData(
+                  brightness: Brightness.dark,
+                  scaffoldBackgroundColor: cBg,
+                  colorScheme: const ColorScheme.dark(primary: cCyan, secondary: cViolet),
+                ),
+                home: const Home(),
+              );
+            }
           }
 
-          private fun txt(n: AssistStructure.ViewNode): String =
-              n.autofillValue?.takeIf { it.isText }?.textValue?.toString().orEmpty()
+          // ---------- Glas-Bausteine ----------
 
-          private fun isUserField(n: AssistStructure.ViewNode, hints: List<String>): Boolean {
-              if (hints.any { it == "username" || it.contains("email") }) return true
-              val v = n.inputType and InputType.TYPE_MASK_VARIATION
-              if (v == InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS || v == InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS) return true
-              val rx = Regex("user|mail|login")
-              return n.htmlInfo?.attributes?.any { attr ->
-                  val k: String = attr.first
-                  val a: String = attr.second
-                  (k == "type" && a == "email") ||
-                      ((k == "name" || k == "id" || k == "autocomplete") && rx.containsMatchIn(a.lowercase()))
-              } == true
+          class Glass extends StatelessWidget {
+            final Widget child;
+            final double radius;
+            final EdgeInsets padding;
+            final double blur;
+            const Glass({
+              super.key,
+              required this.child,
+              this.radius = 24,
+              this.padding = const EdgeInsets.all(14),
+              this.blur = 26,
+            });
+
+            @override
+            Widget build(BuildContext context) {
+              return ClipRRect(
+                borderRadius: BorderRadius.circular(radius),
+                child: BackdropFilter(
+                  filter: ui.ImageFilter.blur(sigmaX: blur, sigmaY: blur),
+                  child: Container(
+                    padding: padding,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(radius),
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [wh(60), wh(16)],
+                      ),
+                      border: Border.all(color: wh(70), width: 1),
+                    ),
+                    child: child,
+                  ),
+                ),
+              );
+            }
           }
 
-          /** Findet Benutzername- und Passwortfeld (auch bei 2-stufigen Logins wie GMX: erst nur E-Mail). */
-          private fun parse(st: AssistStructure): Parsed {
-              val p = Parsed(st.activityComponent.packageName)
-              var prev: AssistStructure.ViewNode? = null
-              fun walk(n: AssistStructure.ViewNode) {
-                  if (p.web == null && !n.webDomain.isNullOrBlank()) p.web = n.webDomain
-                  val id = n.autofillId
-                  if (id != null && n.autofillType == View.AUTOFILL_TYPE_TEXT) {
-                      val hints = n.autofillHints?.map { it.lowercase() }.orEmpty()
-                      val isText = (n.inputType and InputType.TYPE_MASK_CLASS) == InputType.TYPE_CLASS_TEXT
-                      val v = n.inputType and InputType.TYPE_MASK_VARIATION
-                      val isPw = hints.any { it.contains("password") } || (isText && (
-                          v == InputType.TYPE_TEXT_VARIATION_PASSWORD ||
-                          v == InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD ||
-                          v == InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD))
-                      if (isPw) {
-                          if (p.pw == null) { p.pw = id; p.pwTxt = txt(n) }
-                      } else if (p.pw == null) {
-                          if (p.user == null && isUserField(n, hints)) { p.user = id; p.userTxt = txt(n) }
-                          prev = n
-                      }
-                  }
-                  for (i in 0 until n.childCount) walk(n.getChildAt(i))
+          class LogoMark extends StatelessWidget {
+            final double size;
+            const LogoMark({super.key, this.size = 28});
+            @override
+            Widget build(BuildContext context) =>
+                CustomPaint(size: Size.square(size), painter: LogoPainter());
+          }
+
+          class LogoPainter extends CustomPainter {
+            @override
+            void paint(Canvas canvas, Size size) {
+              final c = size.center(Offset.zero);
+              final r = size.width * 0.34;
+              final rect = Rect.fromCircle(center: c, radius: r);
+              final glow = Paint()
+                ..style = PaintingStyle.stroke
+                ..strokeWidth = size.width * 0.14
+                ..strokeCap = StrokeCap.round
+                ..maskFilter = MaskFilter.blur(BlurStyle.normal, size.width * 0.08)
+                ..shader = const SweepGradient(colors: [cCyan, cViolet, cPink, cCyan]).createShader(rect);
+              final ring = Paint()
+                ..style = PaintingStyle.stroke
+                ..strokeWidth = size.width * 0.11
+                ..strokeCap = StrokeCap.round
+                ..shader = const SweepGradient(colors: [cCyan, cViolet, cPink, cCyan]).createShader(rect);
+              const start = 0.7;
+              const sweep = math.pi * 2 - 1.4;
+              canvas.drawArc(rect, start, sweep, false, glow);
+              canvas.drawArc(rect, start, sweep, false, ring);
+              final s = size.width * 0.15;
+              final star = Path()
+                ..moveTo(c.dx, c.dy - s)
+                ..quadraticBezierTo(c.dx, c.dy, c.dx + s, c.dy)
+                ..quadraticBezierTo(c.dx, c.dy, c.dx, c.dy + s)
+                ..quadraticBezierTo(c.dx, c.dy, c.dx - s, c.dy)
+                ..quadraticBezierTo(c.dx, c.dy, c.dx, c.dy - s)
+                ..close();
+              canvas.drawPath(star, Paint()..color = Colors.white);
+            }
+
+            @override
+            bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+          }
+
+          // ---------- Kreis-Painter ----------
+
+          class CirclePainter extends CustomPainter {
+            final List<Offset> pts;
+            final bool closed;
+            final double t;
+            CirclePainter(this.pts, this.closed, this.t);
+
+            @override
+            void paint(Canvas canvas, Size size) {
+              if (pts.length < 2) return;
+              final path = Path()..moveTo(pts.first.dx, pts.first.dy);
+              for (var i = 1; i < pts.length - 1; i++) {
+                final m = Offset((pts[i].dx + pts[i + 1].dx) / 2, (pts[i].dy + pts[i + 1].dy) / 2);
+                path.quadraticBezierTo(pts[i].dx, pts[i].dy, m.dx, m.dy);
               }
-              for (i in 0 until st.windowNodeCount) walk(st.getWindowNodeAt(i).rootViewNode)
-              val pr = prev
-              if (p.user == null && p.pw != null && pr != null) { p.user = pr.autofillId; p.userTxt = txt(pr) }
-              return p
+              path.lineTo(pts.last.dx, pts.last.dy);
+              if (closed) {
+                path.close();
+                final dim = Path.combine(PathOperation.difference, Path()..addRect(Offset.zero & size), path);
+                canvas.drawPath(dim, Paint()..color = const Color(0x99000000));
+              }
+              var b = path.getBounds();
+              if (b.width < 2 || b.height < 2) b = b.inflate(2);
+              final shader = SweepGradient(
+                colors: const [cCyan, cViolet, cPink, cCyan],
+                transform: GradientRotation(t * math.pi * 2),
+              ).createShader(b);
+              canvas.drawPath(
+                path,
+                Paint()
+                  ..style = PaintingStyle.stroke
+                  ..strokeWidth = 16
+                  ..strokeCap = StrokeCap.round
+                  ..strokeJoin = StrokeJoin.round
+                  ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 12)
+                  ..shader = shader,
+              );
+              canvas.drawPath(
+                path,
+                Paint()
+                  ..style = PaintingStyle.stroke
+                  ..strokeWidth = 5
+                  ..strokeCap = StrokeCap.round
+                  ..strokeJoin = StrokeJoin.round
+                  ..shader = shader,
+              );
+            }
+
+            @override
+            bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
           }
 
-          private fun inlinePres(spec: InlinePresentationSpec?, title: String, sub: String, attr: PendingIntent): InlinePresentation? {
-              if (spec == null || !UiVersions.getVersions(spec.style).contains(UiVersions.INLINE_UI_VERSION_1)) return null
-              val ui = InlineSuggestionUi.newContentBuilder(attr).setTitle(title).setSubtitle(sub).build()
-              return InlinePresentation(ui.slice, spec, false)
+          // ---------- Daten ----------
+
+          class Result {
+            final String cropPath;
+            final List<ImageLabel> labels;
+            final String? msg;
+            Result(this.cropPath, this.labels, {this.msg});
           }
 
-          class GlassAutofill : AutofillService() {
-
-              @Suppress("DEPRECATION")
-              override fun onFillRequest(request: FillRequest, signal: CancellationSignal, callback: FillCallback) {
-                  val p = parse(request.fillContexts.last().structure)
-                  if (p.pkg == packageName || (p.pw == null && p.user == null)) return callback.onSuccess(null)
-
-                  val isWeb = p.web != null
-                  val host = p.web ?: p.pkg
-                  val matches = try { Vault.match(Vault.load(this), host, isWeb).take(5) } catch (e: Exception) { emptyList() }
-                  val ids = listOfNotNull(p.user, p.pw)
-                  val specs = request.inlineSuggestionsRequest?.inlinePresentationSpecs.orEmpty()
-                  val attr = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
-                  val resp = FillResponse.Builder()
-
-                  // Ein Vorschlag pro gespeichertem Zugang – Daten werden erst nach Biometrie herausgegeben
-                  matches.forEachIndexed { i, e ->
-                      val intent = Intent(this, AuthActivity::class.java)
-                          .putExtra("eid", e.id).putExtra("user", p.user).putExtra("pw", p.pw)
-                      val pi = PendingIntent.getActivity(
-                          this, e.id.hashCode(), intent, PendingIntent.FLAG_CANCEL_CURRENT or PendingIntent.FLAG_MUTABLE
-                      )
-                      val label = if (e.user.isNotBlank()) e.user else e.title
-                      val pres = RemoteViews(packageName, R.layout.af_item).apply {
-                          setTextViewText(R.id.t, "GlassVault · $label")
-                      }
-                      val ds = Dataset.Builder(pres)
-                      ids.forEach { ds.setValue(it, null) }
-                      inlinePres(specs.getOrNull(i) ?: specs.lastOrNull(), label, "GlassVault", attr)?.let { ds.setInlinePresentation(it) }
-                      ds.setAuthentication(pi.intentSender)
-                      resp.addDataset(ds.build())
-                  }
-
-                  // Unbekannte Seite/App -> Android fragt nach dem Absenden "Speichern?"
-                  val pwId = p.pw
-                  if (pwId != null) {
-                      val sb = SaveInfo.Builder(
-                          SaveInfo.SAVE_DATA_TYPE_PASSWORD or SaveInfo.SAVE_DATA_TYPE_USERNAME, arrayOf(pwId)
-                      )
-                      p.user?.let { sb.setOptionalIds(arrayOf(it)) }
-                      sb.setFlags(SaveInfo.FLAG_SAVE_ON_ALL_VIEWS_INVISIBLE)
-                      resp.setSaveInfo(sb.build())
-                  }
-                  if (matches.isEmpty() && pwId == null) return callback.onSuccess(null)
-                  callback.onSuccess(resp.build())
-              }
-
-              override fun onSaveRequest(request: SaveRequest, callback: SaveCallback) {
-                  try {
-                      val p = parse(request.fillContexts.last().structure)
-                      if (p.pwTxt.isNotBlank()) {
-                          val w = p.web
-                          val isWeb = w != null
-                          val parts = p.pkg.split(".")
-                          val title = if (w != null) Vault.baseDomain(w) else if (parts.size >= 3) parts[1] else parts[0]
-                          val list = Vault.load(this).toMutableList()
-                          val idx = list.indexOfFirst {
-                              it.type == "login" && it.user.equals(p.userTxt, true) &&
-                                  Vault.match(listOf(it), w ?: p.pkg, isWeb).isNotEmpty()
-                          }
-                          if (idx >= 0) list[idx] = list[idx].copy(secret = p.pwTxt)
-                          else list.add(0, Entry(UUID.randomUUID().toString(), "login", title, p.userTxt, p.pwTxt, ""))
-                          Vault.save(this, list)
-                      }
-                  } catch (e: Exception) { }
-                  callback.onSuccess()
-              }
+          class Shop {
+            final String name;
+            final IconData icon;
+            final Color color;
+            final String url;
+            Shop(this.name, this.icon, this.color, this.url);
           }
 
-          /** Biometrie-Abfrage bei JEDEM Ausfüllen – erst danach wird der Eintrag herausgegeben. */
-          class AuthActivity : FragmentActivity() {
-              @Suppress("DEPRECATION")
-              override fun onCreate(savedInstanceState: Bundle?) {
-                  super.onCreate(savedInstanceState)
-                  window.setFlags(
-                      android.view.WindowManager.LayoutParams.FLAG_SECURE,
-                      android.view.WindowManager.LayoutParams.FLAG_SECURE
-                  )
-                  val user = intent.getParcelableExtra<AutofillId>("user")
-                  val pw = intent.getParcelableExtra<AutofillId>("pw")
-                  val eid = intent.getStringExtra("eid")
+          // ---------- Hauptscreen ----------
 
-                  authenticate(onFail = { setResult(RESULT_CANCELED); finish() }) {
-                      val e = Vault.load(this).firstOrNull { it.id == eid }
-                      if (e == null) {
-                          setResult(RESULT_CANCELED)
-                      } else {
-                          val pres = RemoteViews(packageName, R.layout.af_item).apply {
-                              setTextViewText(R.id.t, e.title)
-                          }
-                          val ds = Dataset.Builder(pres)
-                          user?.let { ds.setValue(it, AutofillValue.forText(e.user)) }
-                          pw?.let { ds.setValue(it, AutofillValue.forText(e.secret)) }
-                          setResult(RESULT_OK, Intent().putExtra(AutofillManager.EXTRA_AUTHENTICATION_RESULT, ds.build()))
-                      }
-                      finish()
-                  }
-              }
-          }
-          EOF
-
-          # ---------- Quick-Settings-Kachel -> Wallet ----------
-          cat > app/src/main/java/com/glassvault/app/WalletTile.kt <<'EOF'
-          package com.glassvault.app
-
-          import android.app.PendingIntent
-          import android.content.Intent
-          import android.os.Build
-          import android.service.quicksettings.Tile
-          import android.service.quicksettings.TileService
-
-          class WalletTile : TileService() {
-              override fun onStartListening() {
-                  qsTile?.apply { state = Tile.STATE_INACTIVE; label = "Wallet"; updateTile() }
-              }
-
-              @Suppress("DEPRECATION")
-              override fun onClick() {
-                  val i = Intent(this, MainActivity::class.java)
-                      .putExtra("tab", 1).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                  if (Build.VERSION.SDK_INT >= 34) {
-                      startActivityAndCollapse(
-                          PendingIntent.getActivity(this, 0, i, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-                      )
-                  } else startActivityAndCollapse(i)
-              }
-          }
-          EOF
-
-          # ---------- UI: Glass-Design ----------
-          cat > app/src/main/java/com/glassvault/app/MainActivity.kt <<'EOF'
-          package com.glassvault.app
-
-          import android.content.ClipData
-          import android.content.ClipboardManager
-          import android.content.Context
-          import android.content.Intent
-          import android.os.Bundle
-          import android.os.Handler
-          import android.os.Looper
-          import android.os.PersistableBundle
-          import android.view.WindowManager
-          import android.widget.Toast
-          import androidx.activity.compose.setContent
-          import androidx.compose.foundation.*
-          import androidx.compose.foundation.layout.*
-          import androidx.compose.foundation.lazy.LazyColumn
-          import androidx.compose.foundation.lazy.items
-          import androidx.compose.foundation.shape.CircleShape
-          import androidx.compose.foundation.shape.RoundedCornerShape
-          import androidx.compose.foundation.text.KeyboardOptions
-          import androidx.compose.material3.*
-          import androidx.compose.runtime.*
-          import androidx.compose.ui.Alignment
-          import androidx.compose.ui.Modifier
-          import androidx.compose.ui.draw.clip
-          import androidx.compose.ui.graphics.Brush
-          import androidx.compose.ui.graphics.Color
-          import androidx.compose.ui.platform.LocalContext
-          import androidx.compose.ui.res.painterResource
-          import androidx.compose.ui.text.font.FontFamily
-          import androidx.compose.ui.text.font.FontWeight
-          import androidx.compose.ui.text.input.KeyboardType
-          import androidx.compose.ui.text.input.PasswordVisualTransformation
-          import androidx.compose.ui.text.input.VisualTransformation
-          import androidx.compose.ui.unit.Dp
-          import androidx.compose.ui.unit.dp
-          import androidx.compose.ui.unit.sp
-          import androidx.compose.ui.window.Dialog
-          import androidx.compose.ui.window.DialogProperties
-          import androidx.fragment.app.FragmentActivity
-          import java.util.UUID
-
-          class MainActivity : FragmentActivity() {
-              private var unlocked by mutableStateOf(false)
-              private var tabReq by mutableIntStateOf(0)
-
-              override fun onCreate(savedInstanceState: Bundle?) {
-                  super.onCreate(savedInstanceState)
-                  // Kein Screenshot / keine Vorschau im App-Switcher
-                  window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
-                  tabReq = intent.getIntExtra("tab", 0)
-                  setContent {
-                      GlassTheme {
-                          if (unlocked) Home(tabReq) { unlocked = false }
-                          else LockScreen { unlock() }
-                      }
-                  }
-              }
-
-              override fun onNewIntent(intent: Intent) {
-                  super.onNewIntent(intent)
-                  tabReq = intent.getIntExtra("tab", 0)
-              }
-
-              override fun onStart() { super.onStart(); if (!unlocked) unlock() }
-
-              // Auto-Lock: sobald die App in den Hintergrund geht
-              override fun onStop() { super.onStop(); unlocked = false }
-
-              private fun unlock() = authenticate { unlocked = true }
+          class Home extends StatefulWidget {
+            const Home({super.key});
+            @override
+            State<Home> createState() => _HomeState();
           }
 
-          // ---------- Theme & Helfer ----------
-          val Accent = Color(0xFF8B8DFF)
-          val Dim = Color(0x99FFFFFF)
+          class _HomeState extends State<Home> with SingleTickerProviderStateMixin {
+            CameraController? ctrl;
+            String? error;
+            final List<Offset> pts = [];
+            bool closed = false, busy = false, torch = false;
+            Result? result;
+            int sel = 0;
+            int rid = 0;
+            Size screen = Size.zero;
+            late final AnimationController anim =
+                AnimationController(vsync: this, duration: const Duration(seconds: 3))..repeat();
 
-          @Composable
-          fun GlassTheme(content: @Composable () -> Unit) =
-              MaterialTheme(colorScheme = darkColorScheme(primary = Accent), content = content)
+            @override
+            void initState() {
+              super.initState();
+              _init();
+            }
 
-          fun Modifier.glass(r: Dp = 24.dp, base: Color = Color.Transparent): Modifier {
-              val s = RoundedCornerShape(r)
-              return this.clip(s)
-                  .background(base)
-                  .background(Brush.linearGradient(listOf(Color(0x2EFFFFFF), Color(0x0DFFFFFF))))
-                  .border(1.dp, Brush.linearGradient(listOf(Color(0x66FFFFFF), Color(0x0FFFFFFF))), s)
-          }
+            @override
+            void dispose() {
+              anim.dispose();
+              ctrl?.dispose();
+              super.dispose();
+            }
 
-          fun copy(ctx: Context, text: String) {
-              val cm = ctx.getSystemService(ClipboardManager::class.java)
-              val clip = ClipData.newPlainText("gv", text)
-              clip.description.extras = PersistableBundle().apply {
-                  putBoolean("android.content.extra.IS_SENSITIVE", true)
+            Future<void> _init() async {
+              setState(() => error = null);
+              try {
+                if (cams.isEmpty) cams = await availableCameras();
+                if (cams.isEmpty) throw Exception('keine Kamera');
+                final cam = cams.firstWhere(
+                  (c) => c.lensDirection == CameraLensDirection.back,
+                  orElse: () => cams.first,
+                );
+                final c = CameraController(cam, ResolutionPreset.veryHigh, enableAudio: false);
+                await c.initialize();
+                await c.setFlashMode(FlashMode.off);
+                if (!mounted) {
+                  c.dispose();
+                  return;
+                }
+                setState(() => ctrl = c);
+              } catch (e) {
+                if (mounted) {
+                  setState(() => error = 'Kein Zugriff auf die Kamera.\nBitte erlaube die Kamera in den Einstellungen.');
+                }
               }
-              cm.setPrimaryClip(clip)
-              Handler(Looper.getMainLooper()).postDelayed({ try { cm.clearPrimaryClip() } catch (e: Exception) {} }, 30_000)
-              Toast.makeText(ctx, "Kopiert · wird in 30 s gelöscht", Toast.LENGTH_SHORT).show()
-          }
+            }
 
-          @Composable
-          fun Background() {
-              Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFF0B1020), Color(0xFF1A1040), Color(0xFF0B1020))))) {
-                  Box(Modifier.size(340.dp).offset((-120).dp, (-60).dp)
-                      .background(Brush.radialGradient(listOf(Color(0x884F46E5), Color.Transparent))))
-                  Box(Modifier.size(320.dp).align(Alignment.BottomEnd).offset(100.dp, 80.dp)
-                      .background(Brush.radialGradient(listOf(Color(0x667C3AED), Color.Transparent))))
+            Future<void> _resume() async {
+              try {
+                await ctrl?.resumePreview();
+              } catch (_) {}
+            }
+
+            Future<void> _toggleTorch() async {
+              try {
+                torch = !torch;
+                await ctrl?.setFlashMode(torch ? FlashMode.torch : FlashMode.off);
+              } catch (_) {
+                torch = false;
               }
-          }
+              if (mounted) setState(() {});
+            }
 
-          @Composable
-          fun Logo(size: Dp) {
-              Box(
-                  Modifier.size(size).clip(RoundedCornerShape(size * 0.3f))
-                      .background(Brush.linearGradient(listOf(Color(0xFF6366F1), Color(0xFF8B5CF6)))),
-                  contentAlignment = Alignment.Center
-              ) {
-                  Image(painterResource(R.drawable.ic_logo_fg), null, Modifier.requiredSize(size * 1.6f))
+            Future<void> _clear() async {
+              setState(() {
+                pts.clear();
+                closed = false;
+                result = null;
+              });
+              await _resume();
+            }
+
+            void _start(DragStartDetails d) {
+              if (busy || ctrl == null) return;
+              _resume();
+              setState(() {
+                pts
+                  ..clear()
+                  ..add(d.localPosition);
+                closed = false;
+                result = null;
+              });
+            }
+
+            void _update(DragUpdateDetails d) {
+              if (busy || closed || ctrl == null) return;
+              setState(() => pts.add(d.localPosition));
+            }
+
+            void _end(DragEndDetails d) {
+              if (busy || closed || ctrl == null) return;
+              if (pts.length < 10) {
+                setState(() => pts.clear());
+                return;
               }
-          }
+              setState(() => closed = true);
+              _analyze();
+            }
 
-          @Composable
-          fun GButton(text: String, accent: Boolean = false, onClick: () -> Unit) {
-              val bg = if (accent) Brush.linearGradient(listOf(Color(0xFF6366F1), Color(0xFF8B5CF6)))
-              else Brush.linearGradient(listOf(Color(0x33FFFFFF), Color(0x1AFFFFFF)))
-              Box(
-                  Modifier.clip(RoundedCornerShape(14.dp)).background(bg).clickable(onClick = onClick)
-                      .padding(horizontal = 14.dp, vertical = 10.dp),
-                  contentAlignment = Alignment.Center
-              ) { Text(text, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium) }
-          }
+            Future<void> _analyze() async {
+              setState(() => busy = true);
+              try {
+                final shot = await ctrl!.takePicture();
+                try {
+                  await ctrl!.pausePreview();
+                } catch (_) {}
+                final bytes = await File(shot.path).readAsBytes();
+                var im = img.decodeImage(bytes);
+                if (im == null) throw Exception('decode');
+                im = img.bakeOrientation(im);
 
-          @Composable
-          fun Field(v: String, on: (String) -> Unit, label: String, kb: KeyboardType = KeyboardType.Text, mask: Boolean = false) {
-              OutlinedTextField(
-                  value = v, onValueChange = on, label = { Text(label) }, singleLine = true,
-                  modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp),
-                  visualTransformation = if (mask) PasswordVisualTransformation() else VisualTransformation.None,
-                  keyboardOptions = KeyboardOptions(keyboardType = kb),
-                  colors = OutlinedTextFieldDefaults.colors(
-                      focusedTextColor = Color.White, unfocusedTextColor = Color.White,
-                      focusedBorderColor = Accent, unfocusedBorderColor = Color(0x33FFFFFF),
-                      focusedLabelColor = Accent, unfocusedLabelColor = Dim, cursorColor = Color.White
-                  )
-              )
-          }
+                final W = im.width.toDouble(), H = im.height.toDouble();
+                final scale = math.max(screen.width / W, screen.height / H);
+                final ox = (screen.width - W * scale) / 2;
+                final oy = (screen.height - H * scale) / 2;
 
-          // ---------- Screens ----------
-          @Composable
-          fun LockScreen(onUnlock: () -> Unit) {
-              Box(Modifier.fillMaxSize()) {
-                  Background()
-                  Column(
-                      Modifier.fillMaxSize().padding(32.dp),
-                      horizontalAlignment = Alignment.CenterHorizontally,
-                      verticalArrangement = Arrangement.Center
-                  ) {
-                      Logo(104.dp)
-                      Spacer(Modifier.height(24.dp))
-                      Text("GlassVault", color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold)
-                      Text("Dein Tresor ist gesperrt", color = Dim, fontSize = 14.sp)
-                      Spacer(Modifier.height(32.dp))
-                      GButton("Entsperren", accent = true, onClick = onUnlock)
-                  }
+                double minX = double.infinity, minY = double.infinity;
+                double maxX = -double.infinity, maxY = -double.infinity;
+                for (final p in pts) {
+                  minX = math.min(minX, p.dx);
+                  minY = math.min(minY, p.dy);
+                  maxX = math.max(maxX, p.dx);
+                  maxY = math.max(maxY, p.dy);
+                }
+                final padX = (maxX - minX) * 0.08, padY = (maxY - minY) * 0.08;
+                int x0 = ((minX - padX - ox) / scale).floor().clamp(0, im.width - 1);
+                int y0 = ((minY - padY - oy) / scale).floor().clamp(0, im.height - 1);
+                int x1 = ((maxX + padX - ox) / scale).ceil().clamp(1, im.width);
+                int y1 = ((maxY + padY - oy) / scale).ceil().clamp(1, im.height);
+                final cw = x1 - x0, ch = y1 - y0;
+                if (cw < 24 || ch < 24) {
+                  setState(() => result = Result('', [], msg: 'Zu klein. Kreise das Objekt größer ein.'));
+                  return;
+                }
+                final crop = img.copyCrop(im, x: x0, y: y0, width: cw, height: ch);
+                final path = '${Directory.systemTemp.path}/crop_${DateTime.now().millisecondsSinceEpoch}.jpg';
+                await File(path).writeAsBytes(img.encodeJpg(crop, quality: 90));
+
+                final labeler = ImageLabeler(options: ImageLabelerOptions(confidenceThreshold: 0.4));
+                final all = await labeler.processImage(InputImage.fromFilePath(path));
+                await labeler.close();
+
+                all.sort((a, b) => b.confidence.compareTo(a.confidence));
+                var labs = all.where((l) => !generic.contains(l.label)).toList();
+                if (labs.isEmpty) labs = all;
+                if (labs.length > 6) labs = labs.sublist(0, 6);
+
+                HapticFeedback.mediumImpact();
+                setState(() {
+                  sel = 0;
+                  rid++;
+                  result = Result(path, labs);
+                });
+              } catch (e) {
+                setState(() => result = Result('', [], msg: 'Das hat nicht geklappt. Versuch es nochmal.'));
+              } finally {
+                if (mounted) setState(() => busy = false);
               }
-          }
+            }
 
-          @Composable
-          fun Home(startTab: Int, onLock: () -> Unit) {
-              val ctx = LocalContext.current
-              val all = remember { mutableStateListOf<Entry>().apply { addAll(Vault.load(ctx)) } }
-              var tab by remember(startTab) { mutableIntStateOf(startTab) }
-              var q by remember { mutableStateOf("") }
-              var add by remember { mutableStateOf(false) }
-              var open by remember { mutableStateOf<String?>(null) }
-              val type = if (tab == 0) "login" else "card"
-              val shown = all.filter {
-                  it.type == type && (q.isBlank() || it.title.contains(q, true) || it.user.contains(q, true))
-              }
-              fun persist() = Vault.save(ctx, all.toList())
+            // ----- UI -----
 
-              Box(Modifier.fillMaxSize()) {
-                  Background()
-                  Column(Modifier.fillMaxSize().systemBarsPadding().padding(horizontal = 20.dp, vertical = 16.dp)) {
-                      Row(verticalAlignment = Alignment.CenterVertically) {
-                          Logo(44.dp)
-                          Spacer(Modifier.width(12.dp))
-                          Column(Modifier.weight(1f)) {
-                              Text("GlassVault", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                              Text("${all.size} Einträge · AES-256-GCM", color = Dim, fontSize = 12.sp)
-                          }
-                          GButton("Sperren", onClick = onLock)
-                      }
-                      Spacer(Modifier.height(20.dp))
-                      Row(Modifier.fillMaxWidth().glass(18.dp).padding(4.dp)) {
-                          listOf("Passwörter", "Wallet").forEachIndexed { i, s ->
-                              Box(
-                                  Modifier.weight(1f).clip(RoundedCornerShape(14.dp))
-                                      .background(if (tab == i) Color(0x33FFFFFF) else Color.Transparent)
-                                      .clickable { tab = i; open = null }.padding(vertical = 10.dp),
-                                  contentAlignment = Alignment.Center
-                              ) {
-                                  Text(s, color = Color.White, fontWeight = if (tab == i) FontWeight.SemiBold else FontWeight.Normal)
-                              }
-                          }
-                      }
-                      Spacer(Modifier.height(14.dp))
-                      Field(q, { q = it }, "Suchen")
-                      Spacer(Modifier.height(14.dp))
-                      if (shown.isEmpty()) {
-                          Box(Modifier.fillMaxWidth().padding(top = 60.dp), contentAlignment = Alignment.Center) {
-                              Text(
-                                  if (tab == 0) "Noch keine Passwörter.\nTippe auf + zum Hinzufügen." else "Noch keine Karten.\nTippe auf + zum Hinzufügen.",
-                                  color = Dim
-                              )
-                          }
-                      }
-                      LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(bottom = 100.dp)) {
-                          items(shown, key = { it.id }) { e ->
-                              val isOpen = open == e.id
-                              val toggle = { open = if (isOpen) null else e.id }
-                              val del = { all.remove(e); persist(); open = null }
-                              if (e.type == "login") LoginItem(e, isOpen, toggle, del) else CardItem(e, isOpen, toggle, del)
-                          }
-                      }
-                  }
-                  Box(
-                      Modifier.align(Alignment.BottomEnd).padding(24.dp).size(62.dp).clip(CircleShape)
-                          .background(Brush.linearGradient(listOf(Color(0xFF6366F1), Color(0xFF8B5CF6))))
-                          .clickable { add = true },
-                      contentAlignment = Alignment.Center
-                  ) { Text("+", color = Color.White, fontSize = 30.sp) }
-              }
+            Widget _preview() {
+              final c = ctrl!;
+              final ps = c.value.previewSize!;
+              return SizedBox.expand(
+                child: ClipRect(
+                  child: FittedBox(
+                    fit: BoxFit.cover,
+                    child: SizedBox(width: ps.height, height: ps.width, child: CameraPreview(c)),
+                  ),
+                ),
+              );
+            }
 
-              if (add) AddDialog(type, { add = false }) { e ->
-                  all.add(0, e); persist(); add = false
-              }
-          }
+            Widget _loadingOrError() {
+              return Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Color(0xFF0B0A22), Color(0xFF2A1060)],
+                  ),
+                ),
+                child: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(28),
+                    child: Glass(
+                      radius: 32,
+                      padding: const EdgeInsets.all(28),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const LogoMark(size: 96),
+                          const SizedBox(height: 14),
+                          const Text('Lens',
+                              style: TextStyle(fontSize: 30, fontWeight: FontWeight.w800, letterSpacing: -0.5)),
+                          const SizedBox(height: 10),
+                          if (error == null)
+                            const Padding(
+                              padding: EdgeInsets.only(top: 6),
+                              child: SizedBox(
+                                  width: 26,
+                                  height: 26,
+                                  child: CircularProgressIndicator(strokeWidth: 3, color: cCyan)),
+                            )
+                          else ...[
+                            Text(error!, textAlign: TextAlign.center, style: TextStyle(color: wh(190))),
+                            const SizedBox(height: 18),
+                            FilledButton(
+                              onPressed: _init,
+                              style: FilledButton.styleFrom(backgroundColor: cViolet),
+                              child: const Text('Erneut versuchen'),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            }
 
-          @Composable
-          fun LoginItem(e: Entry, open: Boolean, toggle: () -> Unit, del: () -> Unit) {
-              val ctx = LocalContext.current
-              var show by remember { mutableStateOf(false) }
-              Column(Modifier.fillMaxWidth().glass().clickable(onClick = toggle).padding(16.dp)) {
-                  Row(verticalAlignment = Alignment.CenterVertically) {
-                      Box(
-                          Modifier.size(44.dp).clip(CircleShape)
-                              .background(Brush.linearGradient(listOf(Color(0xFF6366F1), Color(0xFF8B5CF6)))),
-                          contentAlignment = Alignment.Center
-                      ) { Text(e.title.take(1).uppercase(), color = Color.White, fontWeight = FontWeight.Bold) }
-                      Spacer(Modifier.width(14.dp))
-                      Column {
-                          Text(e.title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
-                          Text(e.user, color = Dim, fontSize = 13.sp)
-                      }
-                  }
-                  if (open) {
-                      Spacer(Modifier.height(14.dp))
-                      Text(
-                          if (show) e.secret else "•".repeat(minOf(e.secret.length, 20)),
-                          color = Color.White, fontFamily = FontFamily.Monospace, fontSize = 15.sp
-                      )
-                      Spacer(Modifier.height(12.dp))
-                      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                          GButton("Benutzer") { copy(ctx, e.user) }
-                          GButton("Passwort", accent = true) { copy(ctx, e.secret) }
-                          GButton(if (show) "Verbergen" else "Zeigen") { show = !show }
-                          GButton("Löschen", onClick = del)
-                      }
-                  }
-              }
-          }
+            Widget _topBar() {
+              return Positioned(
+                top: MediaQuery.of(context).padding.top + 12,
+                left: 16,
+                right: 16,
+                child: Row(
+                  children: [
+                    Glass(
+                      radius: 30,
+                      padding: const EdgeInsets.fromLTRB(10, 8, 18, 8),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const LogoMark(size: 30),
+                          const SizedBox(width: 8),
+                          const Text('Lens',
+                              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
+                        ],
+                      ),
+                    ),
+                    const Spacer(),
+                    GestureDetector(
+                      onTap: _toggleTorch,
+                      child: Glass(
+                        radius: 30,
+                        padding: const EdgeInsets.all(12),
+                        child: Icon(torch ? Icons.flashlight_on : Icons.flashlight_off,
+                            size: 22, color: torch ? cCyan : Colors.white),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }
 
-          @Composable
-          fun CardItem(e: Entry, open: Boolean, toggle: () -> Unit, del: () -> Unit) {
-              val ctx = LocalContext.current
-              val parts = e.extra.split("|")
-              val exp = parts.getOrElse(0) { "" }
-              val cvv = parts.getOrElse(1) { "" }
-              val digits = e.secret.filter { it.isDigit() }
-              val numText = if (open) digits.chunked(4).joinToString(" ")
-              else "••••  ••••  ••••  " + digits.takeLast(4)
-              val s = RoundedCornerShape(24.dp)
-              Column {
-                  Column(
-                      Modifier.fillMaxWidth().aspectRatio(1.6f).clip(s)
-                          .background(Brush.linearGradient(listOf(Color(0xFF4F46E5), Color(0xFF9333EA), Color(0xFF0EA5E9))))
-                          .border(1.dp, Color(0x55FFFFFF), s).clickable(onClick = toggle).padding(20.dp),
-                      verticalArrangement = Arrangement.SpaceBetween
-                  ) {
-                      Text(e.title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
-                      Text(numText, color = Color.White, fontFamily = FontFamily.Monospace, fontSize = 19.sp, letterSpacing = 1.sp)
-                      Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                          Column {
-                              Text("INHABER", color = Dim, fontSize = 10.sp)
-                              Text(e.user.uppercase(), color = Color.White, fontSize = 13.sp)
-                          }
-                          Column {
-                              Text("GÜLTIG BIS", color = Dim, fontSize = 10.sp)
-                              Text(exp, color = Color.White, fontSize = 13.sp)
-                          }
-                          if (open) Column {
-                              Text("CVV", color = Dim, fontSize = 10.sp)
-                              Text(cvv, color = Color.White, fontSize = 13.sp)
-                          }
-                      }
-                  }
-                  if (open) {
-                      Spacer(Modifier.height(10.dp))
-                      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                          GButton("Nummer", accent = true) { copy(ctx, digits) }
-                          GButton("CVV") { copy(ctx, cvv) }
-                          GButton("Löschen", onClick = del)
-                      }
-                  }
-              }
-          }
+            Widget _pill(Widget child) => Glass(
+                  radius: 30,
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                  child: child,
+                );
 
-          @Composable
-          fun AddDialog(type: String, onDismiss: () -> Unit, onSave: (Entry) -> Unit) {
-              var t by remember { mutableStateOf("") }
-              var u by remember { mutableStateOf("") }
-              var s by remember { mutableStateOf("") }
-              var x by remember { mutableStateOf("") }
-              var c by remember { mutableStateOf("") }
-              val login = type == "login"
-              Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-                  Column(
-                      Modifier.padding(20.dp).fillMaxWidth().glass(28.dp, Color(0xFF141A36))
-                          .verticalScroll(rememberScrollState()).padding(20.dp),
-                      verticalArrangement = Arrangement.spacedBy(12.dp)
-                  ) {
-                      Text(if (login) "Neues Passwort" else "Neue Karte", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                      if (login) {
-                          Field(t, { t = it }, "Website / App (z. B. netflix.com)", KeyboardType.Uri)
-                          Field(u, { u = it }, "Benutzername / E-Mail", KeyboardType.Email)
-                          Field(s, { s = it }, "Passwort")
-                          GButton("Sicheres Passwort generieren") { s = Vault.generate() }
-                      } else {
-                          Field(t, { t = it }, "Kartenname (z. B. Visa)")
-                          Field(u, { u = it }, "Karteninhaber")
-                          Field(s, { s = it }, "Kartennummer", KeyboardType.Number)
-                          Field(x, { x = it }, "Gültig bis (MM/YY)", KeyboardType.Number)
-                          Field(c, { c = it }, "CVV", KeyboardType.NumberPassword, mask = true)
-                      }
-                      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                          GButton("Abbrechen", onClick = onDismiss)
-                          GButton("Speichern", accent = true) {
-                              if (t.isNotBlank() && s.isNotBlank()) {
-                                  onSave(Entry(UUID.randomUUID().toString(), type, t.trim(), u.trim(), s, if (login) "" else "${x.trim()}|${c.trim()}"))
-                              }
-                          }
-                      }
-                  }
+            Widget _bottom() {
+              final bottom = MediaQuery.of(context).padding.bottom + 18;
+              Widget child;
+              if (busy) {
+                child = _pill(Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: const [
+                    SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2.5, color: cCyan)),
+                    SizedBox(width: 12),
+                    Text('Erkenne …', style: TextStyle(fontWeight: FontWeight.w600)),
+                  ],
+                ));
+              } else if (result != null) {
+                child = TweenAnimationBuilder<double>(
+                  key: ValueKey(rid),
+                  tween: Tween(begin: 0, end: 1),
+                  duration: const Duration(milliseconds: 380),
+                  curve: Curves.easeOutCubic,
+                  builder: (_, v, w) => Transform.translate(
+                    offset: Offset(0, (1 - v) * 70),
+                    child: Opacity(opacity: v, child: w),
+                  ),
+                  child: _sheet(result!),
+                );
+              } else if (pts.isEmpty) {
+                child = IgnorePointer(
+                  child: _pill(Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.gesture, size: 20, color: cCyan),
+                      const SizedBox(width: 10),
+                      Text('Kreise etwas ein, um es zu finden',
+                          style: TextStyle(fontWeight: FontWeight.w600, color: wh(230))),
+                    ],
+                  )),
+                );
+              } else {
+                child = const SizedBox.shrink();
               }
+              return Positioned(
+                left: 16,
+                right: 16,
+                bottom: bottom,
+                child: Center(child: child),
+              );
+            }
+
+            Widget _sheet(Result r) {
+              final labs = r.labels;
+              if (labs.isEmpty) {
+                return Glass(
+                  radius: 28,
+                  child: Row(
+                    children: [
+                      const Icon(Icons.search_off, color: cPink),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(r.msg ?? 'Nichts erkannt. Kreise das Objekt enger ein.',
+                            style: const TextStyle(fontWeight: FontWeight.w600)),
+                      ),
+                      IconButton(onPressed: _clear, icon: const Icon(Icons.close)),
+                    ],
+                  ),
+                );
+              }
+              final cur = labs[sel.clamp(0, labs.length - 1)];
+              final name = de[cur.label] ?? cur.label;
+              final q = Uri.encodeQueryComponent(name);
+              final shops = [
+                Shop('Google Shopping', Icons.shopping_bag_outlined, cCyan,
+                    'https://www.google.com/search?tbm=shop&q=$q'),
+                Shop('Amazon', Icons.shopping_cart_outlined, const Color(0xFFFFB84D),
+                    'https://www.amazon.de/s?k=$q'),
+                Shop('idealo', Icons.sell_outlined, cViolet,
+                    'https://www.idealo.de/preisvergleich/MainSearchProductCategory.html?q=$q'),
+                Shop('eBay', Icons.storefront_outlined, const Color(0xFF6EE7A0),
+                    'https://www.ebay.de/sch/i.html?_nkw=$q'),
+                Shop('Kleinanzeigen', Icons.handshake_outlined, const Color(0xFF9BE15D),
+                    'https://www.kleinanzeigen.de/s-suchanfrage.html?keywords=$q'),
+                Shop('Otto', Icons.local_mall_outlined, cPink,
+                    'https://www.otto.de/suchen/$q/'),
+              ];
+              return Glass(
+                radius: 32,
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(18),
+                          child: Image.file(File(r.cropPath), width: 64, height: 64, fit: BoxFit.cover),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                      fontSize: 24, fontWeight: FontWeight.w800, letterSpacing: -0.4)),
+                              const SizedBox(height: 2),
+                              Text('${(cur.confidence * 100).round()} % Treffer',
+                                  style: TextStyle(color: wh(170), fontSize: 13)),
+                            ],
+                          ),
+                        ),
+                        IconButton(onPressed: _clear, icon: const Icon(Icons.close)),
+                      ],
+                    ),
+                    if (labs.length > 1) ...[
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          for (var i = 0; i < labs.length; i++)
+                            GestureDetector(
+                              onTap: () => setState(() => sel = i),
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 200),
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(20),
+                                  gradient: i == sel
+                                      ? const LinearGradient(colors: [cCyan, cViolet])
+                                      : null,
+                                  color: i == sel ? null : wh(24),
+                                  border: Border.all(color: wh(i == sel ? 0 : 60)),
+                                ),
+                                child: Text(
+                                  de[labs[i].label] ?? labs[i].label,
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: i == sel ? Colors.black : Colors.white,
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
+                    const SizedBox(height: 16),
+                    Text('HIER KAUFEN',
+                        style: TextStyle(
+                            letterSpacing: 1.6, fontSize: 11, color: wh(150), fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 10),
+                    LayoutBuilder(builder: (context, b) {
+                      final w = (b.maxWidth - 10) / 2;
+                      return Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        children: [for (final s in shops) SizedBox(width: w, child: _shopBtn(s))],
+                      );
+                    }),
+                  ],
+                ),
+              );
+            }
+
+            Widget _shopBtn(Shop s) {
+              return Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(16),
+                  onTap: () async {
+                    try {
+                      await launchUrl(Uri.parse(s.url), mode: LaunchMode.externalApplication);
+                    } catch (_) {}
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 12),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(16),
+                      color: wh(22),
+                      border: Border.all(color: wh(60)),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(s.icon, size: 18, color: s.color),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(s.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
+                        ),
+                        Icon(Icons.arrow_outward, size: 14, color: wh(140)),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }
+
+            @override
+            Widget build(BuildContext context) {
+              return Scaffold(
+                backgroundColor: cBg,
+                body: LayoutBuilder(builder: (context, box) {
+                  screen = Size(box.maxWidth, box.maxHeight);
+                  final ready = ctrl != null && ctrl!.value.isInitialized;
+                  return Stack(
+                    children: [
+                      if (ready) _preview() else _loadingOrError(),
+                      if (ready)
+                        Positioned.fill(
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onPanStart: _start,
+                            onPanUpdate: _update,
+                            onPanEnd: _end,
+                            child: AnimatedBuilder(
+                              animation: anim,
+                              builder: (_, __) => CustomPaint(
+                                painter: CirclePainter(List.of(pts), closed, anim.value),
+                              ),
+                            ),
+                          ),
+                        ),
+                      if (ready) _topBar(),
+                      if (ready) _bottom(),
+                    ],
+                  );
+                }),
+              );
+            }
           }
           EOF
 
       - name: APK bauen
-        shell: bash
-        run: gradle assembleDebug --no-daemon --console=plain 2>&1 | tee build.log
+        working-directory: app
+        run: flutter build apk --release --split-per-abi
 
-      - name: Fehlerübersicht
-        if: failure()
-        run: |
-          grep -E "^e: |What went wrong|error:" -A2 build.log | head -40 || true
-
-      - uses: actions/upload-artifact@v4
+      - name: APK hochladen
+        uses: actions/upload-artifact@v4
         with:
-          name: GlassVault-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: Lens-APK
+          path: app/build/app/outputs/flutter-apk/*.apk

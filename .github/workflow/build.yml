@@ -1,0 +1,387 @@
+# .github/workflows/build.yml  – enthält die komplette App (kein weiterer Code im Repo nötig)
+name: secure-vault-build
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+      KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASS }}
+      KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+    steps:
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "17" }
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, cache: true }
+
+      - name: Projekt und App-Code erzeugen
+        run: |
+          flutter create --platforms=android --org com.example --project-name secure_vault app
+          cd app
+          sed -i 's/FlutterActivity/FlutterFragmentActivity/g' "$(find android -name MainActivity.kt)"
+          sed -i 's#<application#<uses-permission android:name="android.permission.USE_BIOMETRIC"/>\n    <uses-permission android:name="android.permission.CAMERA"/>\n    <application android:allowBackup="false" android:usesCleartextTraffic="false"#' android/app/src/main/AndroidManifest.xml
+          cat > pubspec.yaml <<'YAML'
+          name: secure_vault
+          publish_to: none
+          version: 1.0.0+1
+          environment:
+            sdk: ">=3.3.0 <4.0.0"
+          dependencies:
+            flutter:
+              sdk: flutter
+            cryptography: ^2.7.0
+            flutter_secure_storage: ^9.2.2
+            local_auth: ^2.3.0
+            camera: ^0.11.0
+            google_mlkit_face_detection: ^0.11.0
+          flutter:
+            uses-material-design: true
+          YAML
+          cat > lib/face.dart <<'DART'
+          import 'dart:math';
+          import 'package:camera/camera.dart';
+          import 'package:flutter/material.dart';
+          import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
+
+          // Eigene Gesichtsprüfung: Live-Gesicht + zufällige Aufgabe (Blinzeln oder Lächeln)
+          class FacePage extends StatefulWidget {
+            const FacePage({super.key});
+            @override
+            State<FacePage> createState() => _FacePageState();
+          }
+
+          class _FacePageState extends State<FacePage> {
+            CameraController? _cam;
+            final _det = FaceDetector(
+                options: FaceDetectorOptions(enableClassification: true));
+            final _blink = Random.secure().nextBool();
+            bool _open = false, _busy = false, _done = false;
+
+            @override
+            void initState() {
+              super.initState();
+              _start();
+            }
+
+            Future<void> _start() async {
+              final cams = await availableCameras();
+              final cam = cams.firstWhere(
+                  (c) => c.lensDirection == CameraLensDirection.front);
+              _cam = CameraController(cam, ResolutionPreset.medium,
+                  enableAudio: false, imageFormatGroup: ImageFormatGroup.nv21);
+              await _cam!.initialize();
+              if (!mounted) return;
+              setState(() {});
+              _cam!.startImageStream(_frame);
+            }
+
+            Future<void> _frame(CameraImage img) async {
+              if (_busy || _done) return;
+              _busy = true;
+              try {
+                final rot = InputImageRotationValue.fromRawValue(
+                    _cam!.description.sensorOrientation);
+                if (rot == null) return;
+                final p = img.planes.first;
+                final faces = await _det.processImage(InputImage.fromBytes(
+                    bytes: p.bytes,
+                    metadata: InputImageMetadata(
+                        size: Size(img.width.toDouble(), img.height.toDouble()),
+                        rotation: rot,
+                        format: InputImageFormat.nv21,
+                        bytesPerRow: p.bytesPerRow)));
+                if (faces.length != 1) return;
+                final f = faces.first;
+                if (_blink) {
+                  final e = min(f.leftEyeOpenProbability ?? 1,
+                      f.rightEyeOpenProbability ?? 1);
+                  if (e > 0.8) {
+                    _open = true;
+                  } else if (_open && e < 0.2) {
+                    _ok();
+                  }
+                } else if ((f.smilingProbability ?? 0) > 0.85) {
+                  _ok();
+                }
+              } finally {
+                _busy = false;
+              }
+            }
+
+            void _ok() {
+              _done = true;
+              if (mounted) Navigator.pop(context, true);
+            }
+
+            @override
+            void dispose() {
+              _cam?.stopImageStream().catchError((_) {});
+              _cam?.dispose();
+              _det.close();
+              super.dispose();
+            }
+
+            @override
+            Widget build(BuildContext c) => Scaffold(
+                  appBar: AppBar(title: Text(_blink ? 'Bitte blinzeln' : 'Bitte lächeln')),
+                  body: _cam?.value.isInitialized == true
+                      ? CameraPreview(_cam!)
+                      : const Center(child: CircularProgressIndicator()),
+                );
+          }
+          DART
+          cat > lib/main.dart <<'DART'
+          import 'dart:convert';
+          import 'dart:math';
+          import 'package:cryptography/cryptography.dart';
+          import 'package:flutter/material.dart';
+          import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+          import 'package:local_auth/local_auth.dart';
+          import 'face.dart';
+
+          const _st = FlutterSecureStorage(
+              aOptions: AndroidOptions(encryptedSharedPreferences: true));
+          final _aes = AesGcm.with256bits();
+          final _kdf = Pbkdf2(macAlgorithm: Hmac.sha256(), iterations: 600000, bits: 256);
+          final _auth = LocalAuthentication();
+          final _rng = Random.secure();
+
+          List<int> _rnd(int n) => List.generate(n, (_) => _rng.nextInt(256));
+          Future<String> _enc(List<int> d, SecretKey k) async =>
+              base64.encode((await _aes.encrypt(d, secretKey: k)).concatenation());
+          Future<List<int>> _dec(String s, SecretKey k) => _aes.decrypt(
+              SecretBox.fromConcatenation(base64.decode(s), nonceLength: 12, macLength: 16),
+              secretKey: k);
+          Future<SecretKey> _kek(String pin, List<int> salt) =>
+              _kdf.deriveKeyFromPassword(password: pin, nonce: salt);
+
+          void main() => runApp(const MaterialApp(home: Vault()));
+
+          class Vault extends StatefulWidget {
+            const Vault({super.key});
+            @override
+            State<Vault> createState() => _VaultState();
+          }
+
+          class _VaultState extends State<Vault> with WidgetsBindingObserver {
+            final _pin = TextEditingController(), _note = TextEditingController();
+            SecretKey? _master;
+            bool _setup = false, _busy = false, _bio = false;
+            String _msg = '';
+
+            @override
+            void initState() {
+              super.initState();
+              WidgetsBinding.instance.addObserver(this);
+              _init();
+            }
+
+            Future<void> _init() async {
+              final w = await _st.read(key: 'wrapped');
+              final b = await _st.read(key: 'bio_master');
+              setState(() {
+                _setup = w == null;
+                _bio = b != null;
+              });
+            }
+
+            void _lock() => setState(() {
+                  _master = null;
+                  _note.clear();
+                  _pin.clear();
+                });
+
+            @override
+            void didChangeAppLifecycleState(AppLifecycleState s) {
+              if (s == AppLifecycleState.paused && _master != null) _lock();
+            }
+
+            Future<bool> _locked() async {
+              final f = int.tryParse(await _st.read(key: 'fails') ?? '0') ?? 0;
+              final left = (int.tryParse(await _st.read(key: 'until') ?? '0') ?? 0) -
+                  DateTime.now().millisecondsSinceEpoch;
+              if (f >= 3 && left > 0) {
+                setState(() => _msg = 'Gesperrt: noch ${(left / 1000).ceil()} s');
+                return true;
+              }
+              return false;
+            }
+
+            Future<void> _fail() async {
+              final f = (int.tryParse(await _st.read(key: 'fails') ?? '0') ?? 0) + 1;
+              await _st.write(key: 'fails', value: '$f');
+              if (f >= 3) {
+                final s = 30 * pow(2, min(f - 3, 10)).toInt();
+                await _st.write(
+                    key: 'until',
+                    value: '${DateTime.now().millisecondsSinceEpoch + s * 1000}');
+              }
+              setState(() => _msg = 'Falscher Code ($f Fehlversuche)');
+            }
+
+            Future<void> _open(SecretKey m) async {
+              await _st.write(key: 'fails', value: '0');
+              final n = await _st.read(key: 'notes');
+              final t = n == null ? '' : utf8.decode(await _dec(n, m));
+              setState(() {
+                _master = m;
+                _note.text = t;
+                _pin.clear();
+                _msg = '';
+              });
+            }
+
+            Future<void> _submit() async {
+              if (_busy) return;
+              if (!RegExp(r'^\d{10}$').hasMatch(_pin.text)) {
+                setState(() => _msg = 'Genau 10 Ziffern');
+                return;
+              }
+              setState(() => _busy = true);
+              try {
+                if (_setup) {
+                  final salt = _rnd(16), master = _rnd(32);
+                  await _st.write(key: 'salt', value: base64.encode(salt));
+                  await _st.write(
+                      key: 'wrapped', value: await _enc(master, await _kek(_pin.text, salt)));
+                  setState(() => _setup = false);
+                  await _open(SecretKey(master));
+                } else if (!await _locked()) {
+                  final salt = base64.decode((await _st.read(key: 'salt'))!);
+                  try {
+                    final m = await _dec((await _st.read(key: 'wrapped'))!,
+                        await _kek(_pin.text, salt));
+                    await _open(SecretKey(m));
+                  } on SecretBoxAuthenticationError {
+                    await _fail();
+                  }
+                }
+              } finally {
+                if (mounted) setState(() => _busy = false);
+              }
+            }
+
+            // Schicht 1: System-Biometrie (Fingerabdruck / Samsung-Gesicht), Schicht 2: eigene Gesichtsprüfung
+            Future<bool> _bioChain() async {
+              final ok = await _auth.authenticate(
+                  localizedReason: 'Tresor entsperren',
+                  options: const AuthenticationOptions(biometricOnly: true, stickyAuth: true));
+              if (!ok || !mounted) return false;
+              return await Navigator.push<bool>(
+                      context, MaterialPageRoute(builder: (_) => const FacePage())) ??
+                  false;
+            }
+
+            Future<void> _bioUnlock() async {
+              if (await _locked() || !await _bioChain()) return;
+              final b = await _st.read(key: 'bio_master');
+              if (b != null) await _open(SecretKey(base64.decode(b)));
+            }
+
+            Future<void> _enableBio() async {
+              if (!await _bioChain()) return;
+              await _st.write(
+                  key: 'bio_master', value: base64.encode(await _master!.extractBytes()));
+              setState(() {
+                _bio = true;
+                _msg = 'Biometrie aktiviert';
+              });
+            }
+
+            Future<void> _save() async {
+              await _st.write(
+                  key: 'notes', value: await _enc(utf8.encode(_note.text), _master!));
+              setState(() => _msg = 'Verschlüsselt gespeichert');
+            }
+
+            @override
+            Widget build(BuildContext c) {
+              if (_master != null) {
+                return Scaffold(
+                  appBar: AppBar(title: const Text('Tresor'), actions: [
+                    if (!_bio)
+                      IconButton(icon: const Icon(Icons.fingerprint), onPressed: _enableBio),
+                    IconButton(icon: const Icon(Icons.lock), onPressed: _lock),
+                  ]),
+                  body: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(children: [
+                      Expanded(
+                          child: TextField(
+                              controller: _note,
+                              maxLines: null,
+                              expands: true,
+                              decoration: const InputDecoration(border: OutlineInputBorder()))),
+                      const SizedBox(height: 8),
+                      FilledButton(onPressed: _save, child: const Text('Speichern')),
+                      Text(_msg),
+                    ]),
+                  ),
+                );
+              }
+              return Scaffold(
+                body: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(mainAxisSize: MainAxisSize.min, children: [
+                      const Icon(Icons.shield, size: 64),
+                      const SizedBox(height: 16),
+                      TextField(
+                          controller: _pin,
+                          obscureText: true,
+                          keyboardType: TextInputType.number,
+                          maxLength: 10,
+                          enableSuggestions: false,
+                          autocorrect: false,
+                          decoration: InputDecoration(
+                              labelText: _setup ? 'Neuer 10-stelliger Code' : '10-stelliger Code',
+                              border: const OutlineInputBorder())),
+                      FilledButton(
+                          onPressed: _busy ? null : _submit,
+                          child: Text(_setup ? 'Tresor erstellen' : 'Entsperren')),
+                      if (_bio && !_setup)
+                        TextButton.icon(
+                            onPressed: _bioUnlock,
+                            icon: const Icon(Icons.fingerprint),
+                            label: const Text('Fingerabdruck / Gesicht')),
+                      Text(_msg),
+                    ]),
+                  ),
+                ),
+              );
+            }
+          }
+          DART
+
+      - name: Bauen (obfuskiert)
+        working-directory: app
+        run: |
+          flutter pub get
+          flutter build apk --release --obfuscate --split-debug-info=build/symbols
+
+      - name: Signieren (falls Keystore-Secrets gesetzt sind)
+        working-directory: app
+        run: |
+          cp build/app/outputs/flutter-apk/app-release.apk secure_vault.apk
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            AS=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+            "$AS" sign --ks "$RUNNER_TEMP/release.jks" --ks-key-alias "$KEY_ALIAS" \
+              --ks-pass env:KEYSTORE_PASS secure_vault.apk
+            rm -f "$RUNNER_TEMP/release.jks"
+          fi
+          sha256sum secure_vault.apk > secure_vault.apk.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: secure-vault
+          path: |
+            app/secure_vault.apk
+            app/secure_vault.apk.sha256

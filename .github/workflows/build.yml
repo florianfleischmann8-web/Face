@@ -98,6 +98,7 @@ jobs:
           import 'dart:math' as math;
           import 'dart:ui' as ui;
           import 'package:camera/camera.dart';
+          import 'package:flutter/foundation.dart';
           import 'package:flutter/material.dart';
           import 'package:flutter/services.dart';
           import 'package:google_mlkit_image_labeling/google_mlkit_image_labeling.dart';
@@ -110,6 +111,39 @@ jobs:
           const cBg = Color(0xFF07070F);
 
           Color wh(int a) => Color.fromARGB(a, 255, 255, 255);
+
+          Uint8List? cropJob(Map<String, dynamic> a) {
+            final raw = img.decodeImage(a['bytes'] as Uint8List);
+            if (raw == null) return null;
+            final im = img.bakeOrientation(raw);
+            final sw = a['sw'] as double, sh = a['sh'] as double;
+            final p = (a['pts'] as List).cast<double>();
+            final W = im.width.toDouble(), H = im.height.toDouble();
+            final scale = math.max(sw / W, sh / H);
+            final ox = (sw - W * scale) / 2, oy = (sh - H * scale) / 2;
+            double minX = double.infinity, minY = double.infinity;
+            double maxX = -double.infinity, maxY = -double.infinity;
+            for (var i = 0; i + 1 < p.length; i += 2) {
+              minX = math.min(minX, p[i]);
+              maxX = math.max(maxX, p[i]);
+              minY = math.min(minY, p[i + 1]);
+              maxY = math.max(maxY, p[i + 1]);
+            }
+            final padX = (maxX - minX) * 0.08, padY = (maxY - minY) * 0.08;
+            final int x0 = ((minX - padX - ox) / scale).floor().clamp(0, im.width - 1);
+            final int y0 = ((minY - padY - oy) / scale).floor().clamp(0, im.height - 1);
+            final int x1 = ((maxX + padX - ox) / scale).ceil().clamp(1, im.width);
+            final int y1 = ((maxY + padY - oy) / scale).ceil().clamp(1, im.height);
+            final cw = x1 - x0, ch = y1 - y0;
+            if (cw < 24 || ch < 24) return null;
+            var crop = img.copyCrop(im, x: x0, y: y0, width: cw, height: ch);
+            if (math.max(cw, ch) > 1280) {
+              crop = cw >= ch
+                  ? img.copyResize(crop, width: 1280)
+                  : img.copyResize(crop, height: 1280);
+            }
+            return Uint8List.fromList(img.encodeJpg(crop, quality: 92));
+          }
 
           List<CameraDescription> cams = [];
 
@@ -349,6 +383,9 @@ jobs:
             String? error;
             final List<Offset> pts = [];
             bool closed = false, busy = false, torch = false;
+            double zoom = 1, minZ = 1, maxZ = 1, baseZoom = 1;
+            bool drawing = false;
+            int lastCount = 0;
             Result? result;
             int sel = 0;
             int rid = 0;
@@ -378,9 +415,12 @@ jobs:
                   (c) => c.lensDirection == CameraLensDirection.back,
                   orElse: () => cams.first,
                 );
-                final c = CameraController(cam, ResolutionPreset.veryHigh, enableAudio: false);
+                final c = CameraController(cam, ResolutionPreset.max, enableAudio: false);
                 await c.initialize();
                 await c.setFlashMode(FlashMode.off);
+                minZ = await c.getMinZoomLevel();
+                maxZ = await c.getMaxZoomLevel();
+                zoom = minZ;
                 if (!mounted) {
                   c.dispose();
                   return;
@@ -418,31 +458,59 @@ jobs:
               await _resume();
             }
 
-            void _start(DragStartDetails d) {
+            void _start(ScaleStartDetails d) {
               if (busy || ctrl == null) return;
-              _resume();
-              setState(() {
-                pts
-                  ..clear()
-                  ..add(d.localPosition);
-                closed = false;
-                result = null;
-              });
+              lastCount = d.pointerCount;
+              baseZoom = zoom;
+              if (d.pointerCount == 1) {
+                _resume();
+                drawing = true;
+                setState(() {
+                  pts
+                    ..clear()
+                    ..add(d.localFocalPoint);
+                  closed = false;
+                  result = null;
+                });
+              }
             }
 
-            void _update(DragUpdateDetails d) {
+            void _update(ScaleUpdateDetails d) {
               if (busy || closed || ctrl == null) return;
-              setState(() => pts.add(d.localPosition));
+              if (d.pointerCount != lastCount) {
+                lastCount = d.pointerCount;
+                baseZoom = zoom;
+              }
+              if (d.pointerCount >= 2) {
+                if (drawing) {
+                  drawing = false;
+                  setState(() => pts.clear());
+                }
+                _setZoom(baseZoom * d.scale);
+              } else if (drawing) {
+                setState(() => pts.add(d.localFocalPoint));
+              }
             }
 
-            void _end(DragEndDetails d) {
-              if (busy || closed || ctrl == null) return;
+            void _end(ScaleEndDetails d) {
+              if (busy || closed || ctrl == null || !drawing) return;
+              drawing = false;
               if (pts.length < 10) {
                 setState(() => pts.clear());
                 return;
               }
               setState(() => closed = true);
               _analyze();
+            }
+
+            Future<void> _setZoom(double z) async {
+              z = z.clamp(minZ, maxZ).toDouble();
+              if ((z - zoom).abs() < 0.01) return;
+              zoom = z;
+              if (mounted) setState(() {});
+              try {
+                await ctrl?.setZoomLevel(z);
+              } catch (_) {}
             }
 
             Future<void> _analyze() async {
@@ -453,36 +521,21 @@ jobs:
                   await ctrl!.pausePreview();
                 } catch (_) {}
                 final bytes = await File(shot.path).readAsBytes();
-                var im = img.decodeImage(bytes);
-                if (im == null) throw Exception('decode');
-                im = img.bakeOrientation(im);
-
-                final W = im.width.toDouble(), H = im.height.toDouble();
-                final scale = math.max(screen.width / W, screen.height / H);
-                final ox = (screen.width - W * scale) / 2;
-                final oy = (screen.height - H * scale) / 2;
-
-                double minX = double.infinity, minY = double.infinity;
-                double maxX = -double.infinity, maxY = -double.infinity;
-                for (final p in pts) {
-                  minX = math.min(minX, p.dx);
-                  minY = math.min(minY, p.dy);
-                  maxX = math.max(maxX, p.dx);
-                  maxY = math.max(maxY, p.dy);
-                }
-                final padX = (maxX - minX) * 0.08, padY = (maxY - minY) * 0.08;
-                int x0 = ((minX - padX - ox) / scale).floor().clamp(0, im.width - 1);
-                int y0 = ((minY - padY - oy) / scale).floor().clamp(0, im.height - 1);
-                int x1 = ((maxX + padX - ox) / scale).ceil().clamp(1, im.width);
-                int y1 = ((maxY + padY - oy) / scale).ceil().clamp(1, im.height);
-                final cw = x1 - x0, ch = y1 - y0;
-                if (cw < 24 || ch < 24) {
+                final flat = <double>[
+                  for (final p in pts) ...[p.dx, p.dy]
+                ];
+                final jpg = await compute(cropJob, <String, dynamic>{
+                  'bytes': bytes,
+                  'sw': screen.width,
+                  'sh': screen.height,
+                  'pts': flat,
+                });
+                if (jpg == null) {
                   setState(() => result = Result('', [], msg: 'Zu klein. Kreise das Objekt größer ein.'));
                   return;
                 }
-                final crop = img.copyCrop(im, x: x0, y: y0, width: cw, height: ch);
                 final path = '${File(shot.path).parent.path}/crop_${DateTime.now().millisecondsSinceEpoch}.jpg';
-                await File(path).writeAsBytes(img.encodeJpg(crop, quality: 90));
+                await File(path).writeAsBytes(jpg);
 
                 final labeler = ImageLabeler(options: ImageLabelerOptions(confidenceThreshold: 0.4));
                 final all = await labeler.processImage(InputImage.fromFilePath(path));
@@ -601,6 +654,49 @@ jobs:
                       ),
                     ),
                   ],
+                ),
+              );
+            }
+
+            Widget _zoomBar() {
+              final levels = <double>[1, 2, 5, 10]
+                  .where((z) => z >= minZ - 0.01 && z <= maxZ + 0.01)
+                  .toList();
+              if (maxZ - minZ < 0.5 || levels.isEmpty) return const SizedBox.shrink();
+              Widget chip(String label, bool active, VoidCallback onTap) => GestureDetector(
+                    onTap: onTap,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(18),
+                        gradient: active ? const LinearGradient(colors: [cCyan, cViolet]) : null,
+                      ),
+                      child: Text(label,
+                          style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: active ? Colors.black : Colors.white)),
+                    ),
+                  );
+              final matched = levels.any((z) => (zoom - z).abs() < 0.15);
+              return Positioned(
+                left: 0,
+                right: 0,
+                bottom: MediaQuery.of(context).padding.bottom + 88,
+                child: Center(
+                  child: Glass(
+                    radius: 26,
+                    padding: const EdgeInsets.all(5),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (!matched) chip('${zoom.toStringAsFixed(1)}×', true, () {}),
+                        for (final z in levels)
+                          chip('${z.toStringAsFixed(0)}×', (zoom - z).abs() < 0.15, () => _setZoom(z)),
+                      ],
+                    ),
+                  ),
                 ),
               );
             }
@@ -828,9 +924,9 @@ jobs:
                         Positioned.fill(
                           child: GestureDetector(
                             behavior: HitTestBehavior.opaque,
-                            onPanStart: _start,
-                            onPanUpdate: _update,
-                            onPanEnd: _end,
+                            onScaleStart: _start,
+                            onScaleUpdate: _update,
+                            onScaleEnd: _end,
                             child: AnimatedBuilder(
                               animation: anim,
                               builder: (_, __) => CustomPaint(
@@ -841,6 +937,7 @@ jobs:
                         ),
                       if (ready) _topBar(),
                       if (ready) _bottom(),
+                      if (ready && result == null && !busy) _zoomBar(),
                     ],
                   );
                 }),
@@ -862,9 +959,19 @@ jobs:
           }
           EOF
 
+      - name: ML-Kit vor Code-Kürzung schützen
+        working-directory: app
+        run: |
+          cat > android/app/proguard-rules.pro <<'EOF'
+          -keep class com.google_mlkit_** { *; }
+          -keep class com.google.mlkit.** { *; }
+          -keep class com.google.android.gms.internal.mlkit_** { *; }
+          -dontwarn com.google.mlkit.**
+          EOF
+
       - name: APK bauen
         working-directory: app
-        run: flutter build apk --release --split-per-abi
+        run: flutter build apk --release --no-shrink --split-per-abi
 
       - name: APK hochladen
         uses: actions/upload-artifact@v4

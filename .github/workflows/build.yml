@@ -481,7 +481,7 @@ jobs:
                   return;
                 }
                 final crop = img.copyCrop(im, x: x0, y: y0, width: cw, height: ch);
-                final path = '${Directory.systemTemp.path}/crop_${DateTime.now().millisecondsSinceEpoch}.jpg';
+                final path = '${File(shot.path).parent.path}/crop_${DateTime.now().millisecondsSinceEpoch}.jpg';
                 await File(path).writeAsBytes(img.encodeJpg(crop, quality: 90));
 
                 final labeler = ImageLabeler(options: ImageLabelerOptions(confidenceThreshold: 0.4));
@@ -500,7 +500,8 @@ jobs:
                   result = Result(path, labs);
                 });
               } catch (e) {
-                setState(() => result = Result('', [], msg: 'Das hat nicht geklappt. Versuch es nochmal.'));
+                final err = e.toString();
+                setState(() => result = Result('', [], msg: 'Fehler: ${err.length > 140 ? err.substring(0, 140) : err}'));
               } finally {
                 if (mounted) setState(() => busy = false);
               }

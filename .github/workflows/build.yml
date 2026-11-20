@@ -1,387 +1,531 @@
-# .github/workflows/build.yml  – enthält die komplette App (kein weiterer Code im Repo nötig)
-name: secure-vault-build
+name: Build Flora APK
+
 on:
+  workflow_dispatch:
   push:
     branches: [main]
-  workflow_dispatch:
-permissions:
-  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
-    env:
-      KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
-      KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASS }}
-      KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/setup-java@v4
-        with: { distribution: temurin, java-version: "21" }
-      - uses: subosito/flutter-action@v2
-        with: { channel: stable, cache: true }
+        with:
+          distribution: temurin
+          java-version: "17"
 
-      - name: Projekt und App-Code erzeugen
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+
+      - name: Projekt erzeugen
         run: |
-          flutter create --platforms=android --org com.example --project-name secure_vault app
-          cd app
-          sed -i 's/FlutterActivity/FlutterFragmentActivity/g' "$(find android -name MainActivity.kt)"
-          sed -i 's#<application#<uses-permission android:name="android.permission.USE_BIOMETRIC"/>\n    <uses-permission android:name="android.permission.CAMERA"/>\n    <application android:allowBackup="false" android:usesCleartextTraffic="false"#' android/app/src/main/AndroidManifest.xml
-          cat > pubspec.yaml <<'YAML'
-          name: secure_vault
-          publish_to: none
-          version: 1.0.0+1
-          environment:
-            sdk: ">=3.3.0 <4.0.0"
-          dependencies:
-            flutter:
-              sdk: flutter
-            cryptography: ^2.7.0
-            flutter_secure_storage: ^9.2.2
-            local_auth: ^2.3.0
-            camera: ^0.11.0
-            google_mlkit_face_detection: ^0.11.0
-          flutter:
-            uses-material-design: true
-          YAML
-          cat > lib/face.dart <<'DART'
-          import 'dart:math';
-          import 'package:camera/camera.dart';
-          import 'package:flutter/material.dart';
-          import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
+          P=app/src/main
+          K=$P/java/com/flora/app
+          mkdir -p $K $P/res/values
 
-          // Eigene Gesichtsprüfung: Live-Gesicht + zufällige Aufgabe (Blinzeln oder Lächeln)
-          class FacePage extends StatefulWidget {
-            const FacePage({super.key});
-            @override
-            State<FacePage> createState() => _FacePageState();
+          cat > settings.gradle.kts <<'EOF'
+          pluginManagement {
+              repositories { google(); mavenCentral(); gradlePluginPortal() }
+          }
+          dependencyResolutionManagement {
+              repositories { google(); mavenCentral() }
+          }
+          rootProject.name = "Flora"
+          include(":app")
+          EOF
+
+          cat > build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application") version "8.5.2" apply false
+              id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+          }
+          EOF
+
+          echo "android.useAndroidX=true" > gradle.properties
+          echo "org.gradle.jvmargs=-Xmx3g" >> gradle.properties
+
+          cat > app/build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+          android {
+              namespace = "com.flora.app"
+              compileSdk = 34
+              defaultConfig {
+                  applicationId = "com.flora.app"
+                  minSdk = 26
+                  targetSdk = 34
+                  versionCode = 1
+                  versionName = "1.0"
+              }
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+              kotlinOptions { jvmTarget = "17" }
+          }
+          EOF
+
+          cat > $P/res/values/themes.xml <<'EOF'
+          <resources>
+              <style name="Flora" parent="android:Theme.DeviceDefault.Wallpaper.NoTitleBar">
+                  <item name="android:windowShowWallpaper">true</item>
+                  <item name="android:windowIsTranslucent">true</item>
+                  <item name="android:statusBarColor">@android:color/transparent</item>
+                  <item name="android:navigationBarColor">@android:color/transparent</item>
+              </style>
+          </resources>
+          EOF
+
+          cat > $P/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.RECORD_AUDIO" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+              <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+              <uses-permission android:name="android.permission.INTERNET" />
+
+              <application android:label="Flora" android:theme="@style/Flora">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:launchMode="singleTask"
+                      android:stateNotNeeded="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                          <category android:name="android.intent.category.HOME" />
+                          <category android:name="android.intent.category.DEFAULT" />
+                      </intent-filter>
+                  </activity>
+                  <service
+                      android:name=".WakeService"
+                      android:exported="false"
+                      android:foregroundServiceType="microphone" />
+              </application>
+          </manifest>
+          EOF
+
+          cat > $K/Cfg.kt <<'EOF'
+          package com.flora.app
+
+          import android.content.Context
+
+          // ===== KONFIGURATION: Liquid-Glass-Look =====
+          object Cfg {
+              const val WAKE = "flora"
+              const val BLUR = 60              // Hintergrund-Blur (px, Android 12+)
+              const val RADIUS = 0.2237f       // Apple-Eckenradius im Verhältnis zur Icon-Größe
+              const val GLASS_TOP = 0x40FFFFFF // Glas-Tönung oben
+              const val GLASS_BOTTOM = 0x10FFFFFF
+              const val DOCK_FILL = 0x33FFFFFF
+              const val DOCK_STROKE = 0x66FFFFFF
           }
 
-          class _FacePageState extends State<FacePage> {
-            CameraController? _cam;
-            final _det = FaceDetector(
-                options: FaceDetectorOptions(enableClassification: true));
-            final _blink = Random.secure().nextBool();
-            bool _open = false, _busy = false, _done = false;
+          fun Context.dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+          EOF
 
-            @override
-            void initState() {
-              super.initState();
-              _start();
-            }
+          cat > $K/Glass.kt <<'EOF'
+          package com.flora.app
 
-            Future<void> _start() async {
-              final cams = await availableCameras();
-              final cam = cams.firstWhere(
-                  (c) => c.lensDirection == CameraLensDirection.front);
-              _cam = CameraController(cam, ResolutionPreset.medium,
-                  enableAudio: false, imageFormatGroup: ImageFormatGroup.nv21);
-              await _cam!.initialize();
-              if (!mounted) return;
-              setState(() {});
-              _cam!.startImageStream(_frame);
-            }
+          import android.graphics.*
+          import android.graphics.drawable.Drawable
 
-            Future<void> _frame(CameraImage img) async {
-              if (_busy || _done) return;
-              _busy = true;
-              try {
-                final rot = InputImageRotationValue.fromRawValue(
-                    _cam!.description.sensorOrientation);
-                if (rot == null) return;
-                final p = img.planes.first;
-                final faces = await _det.processImage(InputImage.fromBytes(
-                    bytes: p.bytes,
-                    metadata: InputImageMetadata(
-                        size: Size(img.width.toDouble(), img.height.toDouble()),
-                        rotation: rot,
-                        format: InputImageFormat.nv21,
-                        bytesPerRow: p.bytesPerRow)));
-                if (faces.length != 1) return;
-                final f = faces.first;
-                if (_blink) {
-                  final e = min(f.leftEyeOpenProbability ?? 1,
-                      f.rightEyeOpenProbability ?? 1);
-                  if (e > 0.8) {
-                    _open = true;
-                  } else if (_open && e < 0.2) {
-                    _ok();
+          object Glass {
+              private val cache = HashMap<String, Bitmap>()
+
+              fun icon(key: String, d: Drawable, s: Int): Bitmap = cache.getOrPut(key) {
+                  val b = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
+                  val c = Canvas(b)
+                  val f = s.toFloat()
+                  val r = f * Cfg.RADIUS
+                  val path = Path().apply { addRoundRect(RectF(2f, 2f, f - 2f, f - 2f), r, r, Path.Direction.CW) }
+
+                  c.save()
+                  c.clipPath(path)
+                  d.setBounds(0, 0, s, s)
+                  d.draw(c)
+                  // Glas-Tönung
+                  val tint = Paint(Paint.ANTI_ALIAS_FLAG)
+                  tint.shader = LinearGradient(0f, 0f, 0f, f, Cfg.GLASS_TOP, Cfg.GLASS_BOTTOM, Shader.TileMode.CLAMP)
+                  c.drawRect(0f, 0f, f, f, tint)
+                  // Glanz oben
+                  val gloss = Paint(Paint.ANTI_ALIAS_FLAG)
+                  gloss.shader = LinearGradient(0f, 0f, 0f, f * 0.5f, 0x55FFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP)
+                  c.drawRect(0f, 0f, f, f * 0.5f, gloss)
+                  c.restore()
+
+                  // Spekulare Kante
+                  val edge = Paint(Paint.ANTI_ALIAS_FLAG)
+                  edge.style = Paint.Style.STROKE
+                  edge.strokeWidth = f * 0.025f
+                  edge.shader = LinearGradient(
+                      0f, 0f, f, f,
+                      intArrayOf(0xDDFFFFFF.toInt(), 0x11FFFFFF, 0x88FFFFFF.toInt()), null, Shader.TileMode.CLAMP
+                  )
+                  c.drawPath(path, edge)
+                  b
+              }
+          }
+          EOF
+
+          cat > $K/Apps.kt <<'EOF'
+          package com.flora.app
+
+          import android.content.Context
+          import android.content.Intent
+          import android.graphics.drawable.Drawable
+          import kotlin.math.abs
+
+          data class AppInfo(val label: String, val pkg: String, val icon: Drawable)
+
+          object Apps {
+              private var cached: List<AppInfo>? = null
+
+              fun list(ctx: Context, refresh: Boolean = false): List<AppInfo> {
+                  if (!refresh) cached?.let { return it }
+                  val pm = ctx.packageManager
+                  val i = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+                  val l = pm.queryIntentActivities(i, 0)
+                      .map { AppInfo(it.loadLabel(pm).toString(), it.activityInfo.packageName, it.loadIcon(pm)) }
+                      .filter { it.pkg != ctx.packageName }
+                      .sortedBy { it.label.lowercase() }
+                  cached = l
+                  return l
+              }
+
+              private val fill = setOf("öffne", "öffnen", "starte", "starten", "open", "bitte", "mach", "die", "den", "das", "app", "auf", "mal")
+
+              fun find(ctx: Context, cmd: String, strict: Boolean): AppInfo? {
+                  val q = cmd.split(" ", ",", ".", "!", "?").filter { it.isNotBlank() && it !in fill }.joinToString(" ")
+                  if (q.length < 2) return null
+                  val all = list(ctx)
+                  val hits = all.filter {
+                      val l = it.label.lowercase()
+                      if (strict) (l == q || (l.length >= 3 && q.contains(l))) else (l == q || l.contains(q) || q.contains(l))
                   }
-                } else if ((f.smilingProbability ?? 0) > 0.85) {
-                  _ok();
-                }
-              } finally {
-                _busy = false;
+                  return hits.minByOrNull { abs(it.label.length - q.length) }
               }
-            }
 
-            void _ok() {
-              _done = true;
-              if (mounted) Navigator.pop(context, true);
-            }
-
-            @override
-            void dispose() {
-              _cam?.stopImageStream().catchError((_) {});
-              _cam?.dispose();
-              _det.close();
-              super.dispose();
-            }
-
-            @override
-            Widget build(BuildContext c) => Scaffold(
-                  appBar: AppBar(title: Text(_blink ? 'Bitte blinzeln' : 'Bitte lächeln')),
-                  body: _cam?.value.isInitialized == true
-                      ? CameraPreview(_cam!)
-                      : const Center(child: CircularProgressIndicator()),
-                );
-          }
-          DART
-          cat > lib/main.dart <<'DART'
-          import 'dart:convert';
-          import 'dart:math';
-          import 'package:cryptography/cryptography.dart';
-          import 'package:flutter/material.dart';
-          import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-          import 'package:local_auth/local_auth.dart';
-          import 'face.dart';
-
-          const _st = FlutterSecureStorage(
-              aOptions: AndroidOptions(encryptedSharedPreferences: true));
-          final _aes = AesGcm.with256bits();
-          final _kdf = Pbkdf2(macAlgorithm: Hmac.sha256(), iterations: 600000, bits: 256);
-          final _auth = LocalAuthentication();
-          final _rng = Random.secure();
-
-          List<int> _rnd(int n) => List.generate(n, (_) => _rng.nextInt(256));
-          Future<String> _enc(List<int> d, SecretKey k) async =>
-              base64.encode((await _aes.encrypt(d, secretKey: k)).concatenation());
-          Future<List<int>> _dec(String s, SecretKey k) => _aes.decrypt(
-              SecretBox.fromConcatenation(base64.decode(s), nonceLength: 12, macLength: 16),
-              secretKey: k);
-          Future<SecretKey> _kek(String pin, List<int> salt) =>
-              _kdf.deriveKeyFromPassword(password: pin, nonce: salt);
-
-          void main() => runApp(const MaterialApp(home: Vault()));
-
-          class Vault extends StatefulWidget {
-            const Vault({super.key});
-            @override
-            State<Vault> createState() => _VaultState();
-          }
-
-          class _VaultState extends State<Vault> with WidgetsBindingObserver {
-            final _pin = TextEditingController(), _note = TextEditingController();
-            SecretKey? _master;
-            bool _setup = false, _busy = false, _bio = false;
-            String _msg = '';
-
-            @override
-            void initState() {
-              super.initState();
-              WidgetsBinding.instance.addObserver(this);
-              _init();
-            }
-
-            Future<void> _init() async {
-              final w = await _st.read(key: 'wrapped');
-              final b = await _st.read(key: 'bio_master');
-              setState(() {
-                _setup = w == null;
-                _bio = b != null;
-              });
-            }
-
-            void _lock() => setState(() {
-                  _master = null;
-                  _note.clear();
-                  _pin.clear();
-                });
-
-            @override
-            void didChangeAppLifecycleState(AppLifecycleState s) {
-              if (s == AppLifecycleState.paused && _master != null) _lock();
-            }
-
-            Future<bool> _locked() async {
-              final f = int.tryParse(await _st.read(key: 'fails') ?? '0') ?? 0;
-              final left = (int.tryParse(await _st.read(key: 'until') ?? '0') ?? 0) -
-                  DateTime.now().millisecondsSinceEpoch;
-              if (f >= 3 && left > 0) {
-                setState(() => _msg = 'Gesperrt: noch ${(left / 1000).ceil()} s');
-                return true;
-              }
-              return false;
-            }
-
-            Future<void> _fail() async {
-              final f = (int.tryParse(await _st.read(key: 'fails') ?? '0') ?? 0) + 1;
-              await _st.write(key: 'fails', value: '$f');
-              if (f >= 3) {
-                final s = 30 * pow(2, min(f - 3, 10)).toInt();
-                await _st.write(
-                    key: 'until',
-                    value: '${DateTime.now().millisecondsSinceEpoch + s * 1000}');
-              }
-              setState(() => _msg = 'Falscher Code ($f Fehlversuche)');
-            }
-
-            Future<void> _open(SecretKey m) async {
-              await _st.write(key: 'fails', value: '0');
-              final n = await _st.read(key: 'notes');
-              final t = n == null ? '' : utf8.decode(await _dec(n, m));
-              setState(() {
-                _master = m;
-                _note.text = t;
-                _pin.clear();
-                _msg = '';
-              });
-            }
-
-            Future<void> _submit() async {
-              if (_busy) return;
-              if (!RegExp(r'^\d{10}$').hasMatch(_pin.text)) {
-                setState(() => _msg = 'Genau 10 Ziffern');
-                return;
-              }
-              setState(() => _busy = true);
-              try {
-                if (_setup) {
-                  final salt = _rnd(16), master = _rnd(32);
-                  await _st.write(key: 'salt', value: base64.encode(salt));
-                  await _st.write(
-                      key: 'wrapped', value: await _enc(master, await _kek(_pin.text, salt)));
-                  setState(() => _setup = false);
-                  await _open(SecretKey(master));
-                } else if (!await _locked()) {
-                  final salt = base64.decode((await _st.read(key: 'salt'))!);
-                  try {
-                    final m = await _dec((await _st.read(key: 'wrapped'))!,
-                        await _kek(_pin.text, salt));
-                    await _open(SecretKey(m));
-                  } on SecretBoxAuthenticationError {
-                    await _fail();
+              fun open(ctx: Context, a: AppInfo) {
+                  ctx.packageManager.getLaunchIntentForPackage(a.pkg)?.let {
+                      it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                      ctx.startActivity(it)
                   }
-                }
-              } finally {
-                if (mounted) setState(() => _busy = false);
               }
-            }
-
-            // Schicht 1: System-Biometrie (Fingerabdruck / Samsung-Gesicht), Schicht 2: eigene Gesichtsprüfung
-            Future<bool> _bioChain() async {
-              final ok = await _auth.authenticate(
-                  localizedReason: 'Tresor entsperren',
-                  options: const AuthenticationOptions(biometricOnly: true, stickyAuth: true));
-              if (!ok || !mounted) return false;
-              return await Navigator.push<bool>(
-                      context, MaterialPageRoute(builder: (_) => const FacePage())) ??
-                  false;
-            }
-
-            Future<void> _bioUnlock() async {
-              if (await _locked() || !await _bioChain()) return;
-              final b = await _st.read(key: 'bio_master');
-              if (b != null) await _open(SecretKey(base64.decode(b)));
-            }
-
-            Future<void> _enableBio() async {
-              if (!await _bioChain()) return;
-              await _st.write(
-                  key: 'bio_master', value: base64.encode(await _master!.extractBytes()));
-              setState(() {
-                _bio = true;
-                _msg = 'Biometrie aktiviert';
-              });
-            }
-
-            Future<void> _save() async {
-              await _st.write(
-                  key: 'notes', value: await _enc(utf8.encode(_note.text), _master!));
-              setState(() => _msg = 'Verschlüsselt gespeichert');
-            }
-
-            @override
-            Widget build(BuildContext c) {
-              if (_master != null) {
-                return Scaffold(
-                  appBar: AppBar(title: const Text('Tresor'), actions: [
-                    if (!_bio)
-                      IconButton(icon: const Icon(Icons.fingerprint), onPressed: _enableBio),
-                    IconButton(icon: const Icon(Icons.lock), onPressed: _lock),
-                  ]),
-                  body: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(children: [
-                      Expanded(
-                          child: TextField(
-                              controller: _note,
-                              maxLines: null,
-                              expands: true,
-                              decoration: const InputDecoration(border: OutlineInputBorder()))),
-                      const SizedBox(height: 8),
-                      FilledButton(onPressed: _save, child: const Text('Speichern')),
-                      Text(_msg),
-                    ]),
-                  ),
-                );
-              }
-              return Scaffold(
-                body: Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(mainAxisSize: MainAxisSize.min, children: [
-                      const Icon(Icons.shield, size: 64),
-                      const SizedBox(height: 16),
-                      TextField(
-                          controller: _pin,
-                          obscureText: true,
-                          keyboardType: TextInputType.number,
-                          maxLength: 10,
-                          enableSuggestions: false,
-                          autocorrect: false,
-                          decoration: InputDecoration(
-                              labelText: _setup ? 'Neuer 10-stelliger Code' : '10-stelliger Code',
-                              border: const OutlineInputBorder())),
-                      FilledButton(
-                          onPressed: _busy ? null : _submit,
-                          child: Text(_setup ? 'Tresor erstellen' : 'Entsperren')),
-                      if (_bio && !_setup)
-                        TextButton.icon(
-                            onPressed: _bioUnlock,
-                            icon: const Icon(Icons.fingerprint),
-                            label: const Text('Fingerabdruck / Gesicht')),
-                      Text(_msg),
-                    ]),
-                  ),
-                ),
-              );
-            }
           }
-          DART
+          EOF
 
-      - name: Bauen (obfuskiert)
-        working-directory: app
-        run: |
-          flutter pub get
-          flutter build apk --release --obfuscate --split-debug-info=build/symbols
+          cat > $K/Orb.kt <<'EOF'
+          package com.flora.app
 
-      - name: Signieren (falls Keystore-Secrets gesetzt sind)
-        working-directory: app
-        run: |
-          cp build/app/outputs/flutter-apk/app-release.apk secure_vault.apk
-          if [ -n "$KEYSTORE_B64" ]; then
-            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
-            AS=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
-            "$AS" sign --ks "$RUNNER_TEMP/release.jks" --ks-key-alias "$KEY_ALIAS" \
-              --ks-pass env:KEYSTORE_PASS secure_vault.apk
-            rm -f "$RUNNER_TEMP/release.jks"
-          fi
-          sha256sum secure_vault.apk > secure_vault.apk.sha256
+          import android.animation.ValueAnimator
+          import android.content.Context
+          import android.graphics.*
+          import android.view.View
+          import android.view.animation.LinearInterpolator
+          import kotlin.math.PI
+          import kotlin.math.min
+          import kotlin.math.sin
+
+          class Orb(c: Context) : View(c) {
+              private var t = 0f
+              private val glow = Paint(Paint.ANTI_ALIAS_FLAG)
+              private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 7f }
+              private val core = Paint(Paint.ANTI_ALIAS_FLAG)
+              private val anim = ValueAnimator.ofFloat(0f, 1f).apply {
+                  duration = 2400
+                  repeatCount = ValueAnimator.INFINITE
+                  interpolator = LinearInterpolator()
+                  addUpdateListener { t = it.animatedValue as Float; invalidate() }
+              }
+
+              override fun onAttachedToWindow() { super.onAttachedToWindow(); anim.start() }
+              override fun onDetachedFromWindow() { anim.cancel(); super.onDetachedFromWindow() }
+
+              override fun onDraw(c: Canvas) {
+                  val cx = width / 2f
+                  val cy = height / 2f
+                  val pulse = 1f + 0.12f * sin(t * 2f * PI.toFloat())
+                  val r = min(width, height) / 2f * 0.45f * pulse
+
+                  glow.shader = RadialGradient(
+                      cx, cy, r * 2f,
+                      intArrayOf(0xAA8A7CFF.toInt(), 0x558AE4FF, 0x00FFFFFF),
+                      floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP
+                  )
+                  c.drawCircle(cx, cy, r * 2f, glow)
+
+                  core.shader = RadialGradient(
+                      cx, cy - r * 0.3f, r,
+                      intArrayOf(0xF0FFFFFF.toInt(), 0x66BFD9FF, 0x33FFFFFF), null, Shader.TileMode.CLAMP
+                  )
+                  c.drawCircle(cx, cy, r, core)
+
+                  c.save()
+                  c.rotate(t * 360f, cx, cy)
+                  ring.shader = SweepGradient(
+                      cx, cy,
+                      intArrayOf(0x00FFFFFF, 0xFFFF7AD9.toInt(), 0xFF7AC8FF.toInt(), 0xFFB7FF9A.toInt(), 0x00FFFFFF), null
+                  )
+                  c.drawCircle(cx, cy, r * 1.08f, ring)
+                  c.restore()
+              }
+          }
+          EOF
+
+          cat > $K/WakeService.kt <<'EOF'
+          package com.flora.app
+
+          import android.app.*
+          import android.content.Context
+          import android.content.Intent
+          import android.content.pm.ServiceInfo
+          import android.graphics.PixelFormat
+          import android.os.*
+          import android.speech.RecognitionListener
+          import android.speech.RecognizerIntent
+          import android.speech.SpeechRecognizer
+          import android.view.Gravity
+          import android.view.WindowManager
+          import android.view.animation.OvershootInterpolator
+
+          class WakeService : Service() {
+              private val h = Handler(Looper.getMainLooper())
+              private var sr: SpeechRecognizer? = null
+              private var orb: Orb? = null
+              private var awake = false
+              private var handled = false
+              private val timeout = Runnable { hideOrb() }
+
+              override fun onBind(i: Intent?): IBinder? = null
+
+              override fun onStartCommand(i: Intent?, f: Int, s: Int): Int {
+                  val nm = getSystemService(NotificationManager::class.java)
+                  nm.createNotificationChannel(NotificationChannel("flora", "Flora", NotificationManager.IMPORTANCE_LOW))
+                  val n = Notification.Builder(this, "flora")
+                      .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+                      .setContentTitle("Flora hört zu")
+                      .setContentText("Sag: Hey Flora")
+                      .build()
+                  if (Build.VERSION.SDK_INT >= 29)
+                      startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+                  else startForeground(1, n)
+                  if (sr == null) begin()
+                  return START_STICKY
+              }
+
+              private fun begin() {
+                  sr = SpeechRecognizer.createSpeechRecognizer(this).apply {
+                      setRecognitionListener(object : RecognitionListener {
+                          override fun onReadyForSpeech(p: Bundle?) {}
+                          override fun onBeginningOfSpeech() {}
+                          override fun onRmsChanged(v: Float) {}
+                          override fun onBufferReceived(b: ByteArray?) {}
+                          override fun onEndOfSpeech() {}
+                          override fun onEvent(t: Int, p: Bundle?) {}
+                          override fun onError(e: Int) {
+                              h.postDelayed({ sr?.cancel(); listen() },
+                                  if (e == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) 800L else 250L)
+                          }
+                          override fun onResults(b: Bundle?) { process(text(b), true); h.postDelayed({ listen() }, 150) }
+                          override fun onPartialResults(b: Bundle?) { process(text(b), false) }
+                      })
+                  }
+                  listen()
+              }
+
+              private fun text(b: Bundle?) =
+                  b?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.lowercase() ?: ""
+
+              private fun listen() {
+                  handled = false
+                  val i = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                      .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                      .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "de-DE")
+                      .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                      .putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+                  sr?.startListening(i)
+              }
+
+              private fun process(t: String, final: Boolean) {
+                  if (handled || t.isBlank()) return
+                  val idx = t.indexOf(Cfg.WAKE)
+                  if (idx < 0 && !awake) return
+                  if (!awake) { awake = true; showOrb() }
+                  h.removeCallbacks(timeout)
+                  h.postDelayed(timeout, 7000)
+                  val cmd = if (idx >= 0) t.substring(idx + Cfg.WAKE.length) else t
+                  val app = Apps.find(this, cmd, !final)
+                  if (app != null) {
+                      handled = true
+                      Apps.open(this, app)
+                      hideOrb()
+                  }
+              }
+
+              private fun showOrb() {
+                  if (orb != null) return
+                  val o = Orb(this)
+                  val lp = WindowManager.LayoutParams(
+                      dp(240), dp(240),
+                      WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                          WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                          WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                      PixelFormat.TRANSLUCENT
+                  )
+                  lp.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+                  lp.y = dp(48)
+                  o.alpha = 0f; o.scaleX = 0.5f; o.scaleY = 0.5f
+                  (getSystemService(Context.WINDOW_SERVICE) as WindowManager).addView(o, lp)
+                  o.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(260)
+                      .setInterpolator(OvershootInterpolator(1.4f)).start()
+                  orb = o
+              }
+
+              private fun hideOrb() {
+                  awake = false
+                  h.removeCallbacks(timeout)
+                  val o = orb ?: return
+                  orb = null
+                  o.animate().alpha(0f).scaleX(0.5f).scaleY(0.5f).setDuration(200).withEndAction {
+                      try { (getSystemService(Context.WINDOW_SERVICE) as WindowManager).removeView(o) } catch (_: Exception) {}
+                  }.start()
+              }
+
+              override fun onDestroy() {
+                  sr?.destroy()
+                  hideOrb()
+                  super.onDestroy()
+              }
+          }
+          EOF
+
+          cat > $K/MainActivity.kt <<'EOF'
+          package com.flora.app
+
+          import android.Manifest
+          import android.app.Activity
+          import android.content.Intent
+          import android.content.pm.PackageManager
+          import android.graphics.Color
+          import android.graphics.drawable.ColorDrawable
+          import android.graphics.drawable.GradientDrawable
+          import android.net.Uri
+          import android.os.Build
+          import android.os.Bundle
+          import android.provider.Settings
+          import android.view.Gravity
+          import android.view.View
+          import android.view.ViewGroup
+          import android.widget.*
+
+          class MainActivity : Activity() {
+              private var asked = false
+              private lateinit var grid: GridView
+
+              override fun onCreate(b: Bundle?) {
+                  super.onCreate(b)
+                  window.setBackgroundDrawable(ColorDrawable(0x22000000))
+                  if (Build.VERSION.SDK_INT >= 31) window.setBackgroundBlurRadius(Cfg.BLUR)
+
+                  val root = FrameLayout(this)
+                  grid = GridView(this).apply {
+                      numColumns = 4
+                      verticalSpacing = dp(22)
+                      selector = ColorDrawable(Color.TRANSPARENT)
+                      clipToPadding = false
+                      setPadding(dp(14), dp(64), dp(14), dp(130))
+                      isVerticalScrollBarEnabled = false
+                  }
+                  root.addView(grid, ViewGroup.LayoutParams(-1, -1))
+
+                  val dock = TextView(this).apply {
+                      text = "●  Sag „Hey Flora“"
+                      setTextColor(Color.WHITE)
+                      textSize = 15f
+                      gravity = Gravity.CENTER
+                      setPadding(dp(28), dp(16), dp(28), dp(16))
+                      background = GradientDrawable().apply {
+                          cornerRadius = dp(32).toFloat()
+                          setColor(Cfg.DOCK_FILL)
+                          setStroke(dp(1), Cfg.DOCK_STROKE)
+                      }
+                  }
+                  root.addView(dock, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = dp(36) })
+                  setContentView(root)
+              }
+
+              override fun onResume() {
+                  super.onResume()
+                  val apps = Apps.list(this, true)
+                  grid.adapter = object : BaseAdapter() {
+                      override fun getCount() = apps.size
+                      override fun getItem(p: Int) = apps[p]
+                      override fun getItemId(p: Int) = p.toLong()
+                      override fun getView(p: Int, v: View?, parent: ViewGroup): View {
+                          val a = apps[p]
+                          val img = ImageView(this@MainActivity).apply {
+                              setImageBitmap(Glass.icon(a.pkg, a.icon, dp(120)))
+                          }
+                          val tv = TextView(this@MainActivity).apply {
+                              text = a.label
+                              setTextColor(Color.WHITE)
+                              textSize = 11f
+                              maxLines = 1
+                              gravity = Gravity.CENTER
+                              setShadowLayer(6f, 0f, 2f, 0x99000000.toInt())
+                          }
+                          return LinearLayout(this@MainActivity).apply {
+                              orientation = LinearLayout.VERTICAL
+                              gravity = Gravity.CENTER_HORIZONTAL
+                              addView(img, LinearLayout.LayoutParams(dp(60), dp(60)))
+                              addView(tv, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
+                              setOnClickListener { Apps.open(this@MainActivity, a) }
+                          }
+                      }
+                  }
+                  checkSetup()
+              }
+
+              private fun checkSetup() {
+                  if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                      if (!asked) {
+                          asked = true
+                          val p = if (Build.VERSION.SDK_INT >= 33)
+                              arrayOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.POST_NOTIFICATIONS)
+                          else arrayOf(Manifest.permission.RECORD_AUDIO)
+                          requestPermissions(p, 1)
+                      }
+                  } else if (!Settings.canDrawOverlays(this)) {
+                      if (!asked) {
+                          asked = true
+                          Toast.makeText(this, "Bitte „Über anderen Apps einblenden“ erlauben", Toast.LENGTH_LONG).show()
+                          startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+                      }
+                  } else {
+                      startForegroundService(Intent(this, WakeService::class.java))
+                  }
+              }
+
+              override fun onRequestPermissionsResult(r: Int, p: Array<out String>, g: IntArray) {
+                  asked = false
+              }
+          }
+          EOF
+
+      - name: APK bauen
+        run: gradle assembleDebug --no-daemon
 
       - uses: actions/upload-artifact@v4
         with:
-          name: secure-vault
-          path: |
-            app/secure_vault.apk
-            app/secure_vault.apk.sha256
+          name: Flora-APK
+          path: app/build/outputs/apk/debug/app-debug.apk

@@ -818,9 +818,22 @@ jobs:
       - uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: 8.7
+          cache-disabled: true
 
       - name: APK bauen
-        run: gradle assembleDebug --stacktrace
+        run: |
+          set -o pipefail
+          gradle assembleDebug --stacktrace --console=plain 2>&1 | tee build.log
+
+      - name: Fehler-Zusammenfassung
+        if: failure()
+        run: |
+          {
+            echo "## Build-Fehler"
+            echo '```'
+            grep -E "^e: |AAPT|What went wrong|Execution failed|error:" -A3 build.log | head -60
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
         with:

@@ -1,531 +1,828 @@
-name: Build Flora APK
+# Discipline - komplette App in einer Datei.
+# Diese Datei als .github/workflows/build.yml in ein leeres GitHub-Repo legen.
+# Dann: Actions -> "Build APK" -> Run workflow -> APK unter "Artifacts" laden.
+name: Build APK
 
 on:
-  workflow_dispatch:
   push:
-    branches: [main]
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: "8.7"
-
-      - name: Projekt erzeugen
+      - name: "Datei app/build.gradle.kts"
         run: |
-          P=app/src/main
-          K=$P/java/com/flora/app
-          mkdir -p $K $P/res/values
-
-          cat > settings.gradle.kts <<'EOF'
-          pluginManagement {
-              repositories { google(); mavenCentral(); gradlePluginPortal() }
+          mkdir -p app
+          cat > app/build.gradle.kts <<'EOF_FILE'
+          plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }
+          android {
+              namespace = "com.discipline.app"
+              compileSdk = 34
+              defaultConfig { applicationId = "com.discipline.app"; minSdk = 26; targetSdk = 34; versionCode = 1; versionName = "1.0" }
+              compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
+              kotlinOptions { jvmTarget = "17" }
+              buildFeatures { compose = true }
+              composeOptions { kotlinCompilerExtensionVersion = "1.5.14" }
           }
-          dependencyResolutionManagement {
-              repositories { google(); mavenCentral() }
+          dependencies {
+              implementation(platform("androidx.compose:compose-bom:2024.06.00"))
+              implementation("androidx.core:core-ktx:1.13.1")
+              implementation("androidx.activity:activity-compose:1.9.0")
+              implementation("androidx.compose.ui:ui")
+              implementation("androidx.compose.material3:material3")
+              implementation("androidx.camera:camera-core:1.3.4")
+              implementation("androidx.camera:camera-camera2:1.3.4")
+              implementation("androidx.camera:camera-lifecycle:1.3.4")
+              implementation("androidx.camera:camera-view:1.3.4")
+              implementation("com.google.mlkit:pose-detection:18.0.0-beta4")
           }
-          rootProject.name = "Flora"
-          include(":app")
-          EOF
+          EOF_FILE
 
-          cat > build.gradle.kts <<'EOF'
+      - name: "Datei build.gradle.kts"
+        run: |
+          mkdir -p .
+          cat > build.gradle.kts <<'EOF_FILE'
           plugins {
               id("com.android.application") version "8.5.2" apply false
               id("org.jetbrains.kotlin.android") version "1.9.24" apply false
           }
-          EOF
+          EOF_FILE
 
-          echo "android.useAndroidX=true" > gradle.properties
-          echo "org.gradle.jvmargs=-Xmx3g" >> gradle.properties
+      - name: "Datei gradle.properties"
+        run: |
+          mkdir -p .
+          cat > gradle.properties <<'EOF_FILE'
+          android.useAndroidX=true
+          EOF_FILE
 
-          cat > app/build.gradle.kts <<'EOF'
-          plugins {
-              id("com.android.application")
-              id("org.jetbrains.kotlin.android")
-          }
-          android {
-              namespace = "com.flora.app"
-              compileSdk = 34
-              defaultConfig {
-                  applicationId = "com.flora.app"
-                  minSdk = 26
-                  targetSdk = 34
-                  versionCode = 1
-                  versionName = "1.0"
-              }
-              compileOptions {
-                  sourceCompatibility = JavaVersion.VERSION_17
-                  targetCompatibility = JavaVersion.VERSION_17
-              }
-              kotlinOptions { jvmTarget = "17" }
-          }
-          EOF
+      - name: "Datei settings.gradle.kts"
+        run: |
+          mkdir -p .
+          cat > settings.gradle.kts <<'EOF_FILE'
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement { repositories { google(); mavenCentral() } }
+          rootProject.name = "Discipline"
+          include(":app")
+          EOF_FILE
 
-          cat > $P/res/values/themes.xml <<'EOF'
-          <resources>
-              <style name="Flora" parent="android:Theme.DeviceDefault.Wallpaper.NoTitleBar">
-                  <item name="android:windowShowWallpaper">true</item>
-                  <item name="android:windowIsTranslucent">true</item>
-                  <item name="android:statusBarColor">@android:color/transparent</item>
-                  <item name="android:navigationBarColor">@android:color/transparent</item>
-              </style>
-          </resources>
-          EOF
-
-          cat > $P/AndroidManifest.xml <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
+      - name: "Datei app/src/main/AndroidManifest.xml"
+        run: |
+          mkdir -p app/src/main
+          cat > app/src/main/AndroidManifest.xml <<'EOF_FILE'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              <uses-permission android:name="android.permission.RECORD_AUDIO" />
-              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-              <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-              <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
-              <uses-permission android:name="android.permission.INTERNET" />
-
-              <application android:label="Flora" android:theme="@style/Flora">
-                  <activity
-                      android:name=".MainActivity"
-                      android:exported="true"
-                      android:launchMode="singleTask"
-                      android:stateNotNeeded="true">
+              <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION"/>
+              <uses-permission android:name="android.permission.CAMERA"/>
+              <uses-permission android:name="android.permission.INTERNET"/>
+              <application android:usesCleartextTraffic="true" android:label="Discipline" android:icon="@mipmap/ic_launcher"
+                  android:roundIcon="@mipmap/ic_launcher" android:theme="@style/Theme.Discipline">
+                  <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTask">
                       <intent-filter>
-                          <action android:name="android.intent.action.MAIN" />
-                          <category android:name="android.intent.category.LAUNCHER" />
-                          <category android:name="android.intent.category.HOME" />
-                          <category android:name="android.intent.category.DEFAULT" />
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
                       </intent-filter>
                   </activity>
-                  <service
-                      android:name=".WakeService"
-                      android:exported="false"
-                      android:foregroundServiceType="microphone" />
+                  <activity android:name=".ExerciseActivity" android:exported="false"/>
+                  <service android:name=".BlockerService" android:exported="true"
+                      android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+                      <intent-filter><action android:name="android.accessibilityservice.AccessibilityService"/></intent-filter>
+                      <meta-data android:name="android.accessibilityservice" android:resource="@xml/accessibility"/>
+                  </service>
+                  <receiver android:name=".AdminReceiver" android:exported="true"
+                      android:permission="android.permission.BIND_DEVICE_ADMIN">
+                      <intent-filter><action android:name="android.app.action.DEVICE_ADMIN_ENABLED"/></intent-filter>
+                      <meta-data android:name="android.app.device_admin" android:resource="@xml/device_admin"/>
+                  </receiver>
               </application>
           </manifest>
-          EOF
+          EOF_FILE
 
-          cat > $K/Cfg.kt <<'EOF'
-          package com.flora.app
+      - name: "Datei app/src/main/res/drawable/ic_bg.xml"
+        run: |
+          mkdir -p app/src/main/res/drawable
+          cat > app/src/main/res/drawable/ic_bg.xml <<'EOF_FILE'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              xmlns:aapt="http://schemas.android.com/aapt"
+              android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+              <path android:pathData="M0,0h108v108h-108z">
+                  <aapt:attr name="android:fillColor">
+                      <gradient android:type="linear" android:startX="0" android:startY="0" android:endX="108" android:endY="108"
+                          android:startColor="#0E1424" android:endColor="#05060D"/>
+                  </aapt:attr>
+              </path>
+              <path android:pathData="M-4,34 a34,34 0 1,0 68,0 a34,34 0 1,0 -68,0 z">
+                  <aapt:attr name="android:fillColor">
+                      <gradient android:type="radial" android:centerX="30" android:centerY="34" android:gradientRadius="36"
+                          android:startColor="#88B6FF00" android:endColor="#00B6FF00"/>
+                  </aapt:attr>
+              </path>
+              <path android:pathData="M42,80 a40,40 0 1,0 80,0 a40,40 0 1,0 -80,0 z">
+                  <aapt:attr name="android:fillColor">
+                      <gradient android:type="radial" android:centerX="82" android:centerY="80" android:gradientRadius="42"
+                          android:startColor="#776A5CFF" android:endColor="#006A5CFF"/>
+                  </aapt:attr>
+              </path>
+          </vector>
+          EOF_FILE
 
-          import android.content.Context
+      - name: "Datei app/src/main/res/drawable/ic_fg.xml"
+        run: |
+          mkdir -p app/src/main/res/drawable
+          cat > app/src/main/res/drawable/ic_fg.xml <<'EOF_FILE'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              xmlns:aapt="http://schemas.android.com/aapt"
+              android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+              <path android:pathData="M54,24 L80,39 L80,69 L54,84 L28,69 L28,39 Z" android:strokeWidth="1.6">
+                  <aapt:attr name="android:fillColor">
+                      <gradient android:type="linear" android:startX="28" android:startY="24" android:endX="80" android:endY="84"
+                          android:startColor="#44FFFFFF" android:endColor="#0DFFFFFF"/>
+                  </aapt:attr>
+                  <aapt:attr name="android:strokeColor">
+                      <gradient android:type="linear" android:startX="28" android:startY="24" android:endX="80" android:endY="84"
+                          android:startColor="#CCFFFFFF" android:endColor="#55B6FF00"/>
+                  </aapt:attr>
+              </path>
+              <path android:pathData="M33,41 L54,29 L70,38" android:strokeColor="#88FFFFFF" android:strokeWidth="1.2"
+                  android:strokeLineCap="round" android:fillColor="#00000000"/>
+              <path android:pathData="M59,34 L44,57 L53,57 L49,76 L66,50 L56,50 Z">
+                  <aapt:attr name="android:fillColor">
+                      <gradient android:type="linear" android:startX="44" android:startY="34" android:endX="66" android:endY="76"
+                          android:startColor="#D8FF4D" android:endColor="#00E5A0"/>
+                  </aapt:attr>
+              </path>
+          </vector>
+          EOF_FILE
 
-          // ===== KONFIGURATION: Liquid-Glass-Look =====
-          object Cfg {
-              const val WAKE = "flora"
-              const val BLUR = 60              // Hintergrund-Blur (px, Android 12+)
-              const val RADIUS = 0.2237f       // Apple-Eckenradius im Verhältnis zur Icon-Größe
-              const val GLASS_TOP = 0x40FFFFFF // Glas-Tönung oben
-              const val GLASS_BOTTOM = 0x10FFFFFF
-              const val DOCK_FILL = 0x33FFFFFF
-              const val DOCK_STROKE = 0x66FFFFFF
-          }
+      - name: "Datei app/src/main/res/drawable/ic_mono.xml"
+        run: |
+          mkdir -p app/src/main/res/drawable
+          cat > app/src/main/res/drawable/ic_mono.xml <<'EOF_FILE'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+              <path android:pathData="M54,24 L80,39 L80,69 L54,84 L28,69 L28,39 Z" android:strokeColor="#FFFFFF" android:strokeWidth="3" android:fillColor="#00000000"/>
+              <path android:pathData="M59,34 L44,57 L53,57 L49,76 L66,50 L56,50 Z" android:fillColor="#FFFFFF"/>
+          </vector>
+          EOF_FILE
 
-          fun Context.dp(v: Int) = (v * resources.displayMetrics.density).toInt()
-          EOF
+      - name: "Datei app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml"
+        run: |
+          mkdir -p app/src/main/res/mipmap-anydpi-v26
+          cat > app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml <<'EOF_FILE'
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@drawable/ic_bg"/>
+              <foreground android:drawable="@drawable/ic_fg"/>
+              <monochrome android:drawable="@drawable/ic_mono"/>
+          </adaptive-icon>
+          EOF_FILE
 
-          cat > $K/Glass.kt <<'EOF'
-          package com.flora.app
+      - name: "Datei app/src/main/res/values/strings.xml"
+        run: |
+          mkdir -p app/src/main/res/values
+          cat > app/src/main/res/values/strings.xml <<'EOF_FILE'
+          <resources>
+              <string name="app_name">Discipline</string>
+              <string name="a11y_desc">Blockiert Social-Media-Apps, bis du deine Challenge erledigt hast.</string>
+          </resources>
+          EOF_FILE
 
-          import android.graphics.*
-          import android.graphics.drawable.Drawable
+      - name: "Datei app/src/main/res/values/themes.xml"
+        run: |
+          mkdir -p app/src/main/res/values
+          cat > app/src/main/res/values/themes.xml <<'EOF_FILE'
+          <resources>
+              <style name="Theme.Discipline" parent="android:Theme.Material.NoActionBar">
+                  <item name="android:windowBackground">#05060D</item>
+                  <item name="android:statusBarColor">#05060D</item>
+                  <item name="android:navigationBarColor">#05060D</item>
+              </style>
+          </resources>
+          EOF_FILE
 
-          object Glass {
-              private val cache = HashMap<String, Bitmap>()
+      - name: "Datei app/src/main/res/xml/accessibility.xml"
+        run: |
+          mkdir -p app/src/main/res/xml
+          cat > app/src/main/res/xml/accessibility.xml <<'EOF_FILE'
+          <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+              android:accessibilityEventTypes="typeWindowStateChanged"
+              android:accessibilityFeedbackType="feedbackGeneric"
+              android:canRetrieveWindowContent="true"
+              android:notificationTimeout="100"
+              android:description="@string/a11y_desc"/>
+          EOF_FILE
 
-              fun icon(key: String, d: Drawable, s: Int): Bitmap = cache.getOrPut(key) {
-                  val b = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
-                  val c = Canvas(b)
-                  val f = s.toFloat()
-                  val r = f * Cfg.RADIUS
-                  val path = Path().apply { addRoundRect(RectF(2f, 2f, f - 2f, f - 2f), r, r, Path.Direction.CW) }
+      - name: "Datei app/src/main/res/xml/device_admin.xml"
+        run: |
+          mkdir -p app/src/main/res/xml
+          cat > app/src/main/res/xml/device_admin.xml <<'EOF_FILE'
+          <device-admin xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-policies><force-lock/></uses-policies>
+          </device-admin>
+          EOF_FILE
 
-                  c.save()
-                  c.clipPath(path)
-                  d.setBounds(0, 0, s, s)
-                  d.draw(c)
-                  // Glas-Tönung
-                  val tint = Paint(Paint.ANTI_ALIAS_FLAG)
-                  tint.shader = LinearGradient(0f, 0f, 0f, f, Cfg.GLASS_TOP, Cfg.GLASS_BOTTOM, Shader.TileMode.CLAMP)
-                  c.drawRect(0f, 0f, f, f, tint)
-                  // Glanz oben
-                  val gloss = Paint(Paint.ANTI_ALIAS_FLAG)
-                  gloss.shader = LinearGradient(0f, 0f, 0f, f * 0.5f, 0x55FFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP)
-                  c.drawRect(0f, 0f, f, f * 0.5f, gloss)
-                  c.restore()
+      - name: "Datei app/src/main/java/com/discipline/app/AdminReceiver.kt"
+        run: |
+          mkdir -p app/src/main/java/com/discipline/app
+          cat > app/src/main/java/com/discipline/app/AdminReceiver.kt <<'EOF_FILE'
+          package com.discipline.app
+          import android.app.admin.DeviceAdminReceiver
+          class AdminReceiver : DeviceAdminReceiver()
+          EOF_FILE
 
-                  // Spekulare Kante
-                  val edge = Paint(Paint.ANTI_ALIAS_FLAG)
-                  edge.style = Paint.Style.STROKE
-                  edge.strokeWidth = f * 0.025f
-                  edge.shader = LinearGradient(
-                      0f, 0f, f, f,
-                      intArrayOf(0xDDFFFFFF.toInt(), 0x11FFFFFF, 0x88FFFFFF.toInt()), null, Shader.TileMode.CLAMP
-                  )
-                  c.drawPath(path, edge)
-                  b
-              }
-          }
-          EOF
-
-          cat > $K/Apps.kt <<'EOF'
-          package com.flora.app
-
-          import android.content.Context
+      - name: "Datei app/src/main/java/com/discipline/app/BlockerService.kt"
+        run: |
+          mkdir -p app/src/main/java/com/discipline/app
+          cat > app/src/main/java/com/discipline/app/BlockerService.kt <<'EOF_FILE'
+          package com.discipline.app
+          import android.accessibilityservice.AccessibilityService
+          import android.app.admin.DevicePolicyManager
+          import android.content.ComponentName
           import android.content.Intent
-          import android.graphics.drawable.Drawable
-          import kotlin.math.abs
+          import android.hardware.Sensor
+          import android.hardware.SensorEvent
+          import android.hardware.SensorEventListener
+          import android.hardware.SensorManager
+          import android.os.Handler
+          import android.os.Looper
+          import android.os.PowerManager
+          import android.view.accessibility.AccessibilityEvent
 
-          data class AppInfo(val label: String, val pkg: String, val icon: Drawable)
-
-          object Apps {
-              private var cached: List<AppInfo>? = null
-
-              fun list(ctx: Context, refresh: Boolean = false): List<AppInfo> {
-                  if (!refresh) cached?.let { return it }
-                  val pm = ctx.packageManager
-                  val i = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-                  val l = pm.queryIntentActivities(i, 0)
-                      .map { AppInfo(it.loadLabel(pm).toString(), it.activityInfo.packageName, it.loadIcon(pm)) }
-                      .filter { it.pkg != ctx.packageName }
-                      .sortedBy { it.label.lowercase() }
-                  cached = l
-                  return l
-              }
-
-              private val fill = setOf("öffne", "öffnen", "starte", "starten", "open", "bitte", "mach", "die", "den", "das", "app", "auf", "mal")
-
-              fun find(ctx: Context, cmd: String, strict: Boolean): AppInfo? {
-                  val q = cmd.split(" ", ",", ".", "!", "?").filter { it.isNotBlank() && it !in fill }.joinToString(" ")
-                  if (q.length < 2) return null
-                  val all = list(ctx)
-                  val hits = all.filter {
-                      val l = it.label.lowercase()
-                      if (strict) (l == q || (l.length >= 3 && q.contains(l))) else (l == q || l.contains(q) || q.contains(l))
-                  }
-                  return hits.minByOrNull { abs(it.label.length - q.length) }
-              }
-
-              fun open(ctx: Context, a: AppInfo) {
-                  ctx.packageManager.getLaunchIntentForPackage(a.pkg)?.let {
-                      it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                      ctx.startActivity(it)
-                  }
-              }
-          }
-          EOF
-
-          cat > $K/Orb.kt <<'EOF'
-          package com.flora.app
-
-          import android.animation.ValueAnimator
-          import android.content.Context
-          import android.graphics.*
-          import android.view.View
-          import android.view.animation.LinearInterpolator
-          import kotlin.math.PI
-          import kotlin.math.min
-          import kotlin.math.sin
-
-          class Orb(c: Context) : View(c) {
-              private var t = 0f
-              private val glow = Paint(Paint.ANTI_ALIAS_FLAG)
-              private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 7f }
-              private val core = Paint(Paint.ANTI_ALIAS_FLAG)
-              private val anim = ValueAnimator.ofFloat(0f, 1f).apply {
-                  duration = 2400
-                  repeatCount = ValueAnimator.INFINITE
-                  interpolator = LinearInterpolator()
-                  addUpdateListener { t = it.animatedValue as Float; invalidate() }
-              }
-
-              override fun onAttachedToWindow() { super.onAttachedToWindow(); anim.start() }
-              override fun onDetachedFromWindow() { anim.cancel(); super.onDetachedFromWindow() }
-
-              override fun onDraw(c: Canvas) {
-                  val cx = width / 2f
-                  val cy = height / 2f
-                  val pulse = 1f + 0.12f * sin(t * 2f * PI.toFloat())
-                  val r = min(width, height) / 2f * 0.45f * pulse
-
-                  glow.shader = RadialGradient(
-                      cx, cy, r * 2f,
-                      intArrayOf(0xAA8A7CFF.toInt(), 0x558AE4FF, 0x00FFFFFF),
-                      floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP
-                  )
-                  c.drawCircle(cx, cy, r * 2f, glow)
-
-                  core.shader = RadialGradient(
-                      cx, cy - r * 0.3f, r,
-                      intArrayOf(0xF0FFFFFF.toInt(), 0x66BFD9FF, 0x33FFFFFF), null, Shader.TileMode.CLAMP
-                  )
-                  c.drawCircle(cx, cy, r, core)
-
-                  c.save()
-                  c.rotate(t * 360f, cx, cy)
-                  ring.shader = SweepGradient(
-                      cx, cy,
-                      intArrayOf(0x00FFFFFF, 0xFFFF7AD9.toInt(), 0xFF7AC8FF.toInt(), 0xFFB7FF9A.toInt(), 0x00FFFFFF), null
-                  )
-                  c.drawCircle(cx, cy, r * 1.08f, ring)
-                  c.restore()
-              }
-          }
-          EOF
-
-          cat > $K/WakeService.kt <<'EOF'
-          package com.flora.app
-
-          import android.app.*
-          import android.content.Context
-          import android.content.Intent
-          import android.content.pm.ServiceInfo
-          import android.graphics.PixelFormat
-          import android.os.*
-          import android.speech.RecognitionListener
-          import android.speech.RecognizerIntent
-          import android.speech.SpeechRecognizer
-          import android.view.Gravity
-          import android.view.WindowManager
-          import android.view.animation.OvershootInterpolator
-
-          class WakeService : Service() {
+          class BlockerService : AccessibilityService(), SensorEventListener {
               private val h = Handler(Looper.getMainLooper())
-              private var sr: SpeechRecognizer? = null
-              private var orb: Orb? = null
-              private var awake = false
-              private var handled = false
-              private val timeout = Runnable { hideOrb() }
+              private var inBlockedApp = false
 
-              override fun onBind(i: Intent?): IBinder? = null
-
-              override fun onStartCommand(i: Intent?, f: Int, s: Int): Int {
-                  val nm = getSystemService(NotificationManager::class.java)
-                  nm.createNotificationChannel(NotificationChannel("flora", "Flora", NotificationManager.IMPORTANCE_LOW))
-                  val n = Notification.Builder(this, "flora")
-                      .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-                      .setContentTitle("Flora hört zu")
-                      .setContentText("Sag: Hey Flora")
-                      .build()
-                  if (Build.VERSION.SDK_INT >= 29)
-                      startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
-                  else startForeground(1, n)
-                  if (sr == null) begin()
-                  return START_STICKY
-              }
-
-              private fun begin() {
-                  sr = SpeechRecognizer.createSpeechRecognizer(this).apply {
-                      setRecognitionListener(object : RecognitionListener {
-                          override fun onReadyForSpeech(p: Bundle?) {}
-                          override fun onBeginningOfSpeech() {}
-                          override fun onRmsChanged(v: Float) {}
-                          override fun onBufferReceived(b: ByteArray?) {}
-                          override fun onEndOfSpeech() {}
-                          override fun onEvent(t: Int, p: Bundle?) {}
-                          override fun onError(e: Int) {
-                              h.postDelayed({ sr?.cancel(); listen() },
-                                  if (e == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) 800L else 250L)
-                          }
-                          override fun onResults(b: Bundle?) { process(text(b), true); h.postDelayed({ listen() }, 150) }
-                          override fun onPartialResults(b: Bundle?) { process(text(b), false) }
-                      })
-                  }
-                  listen()
-              }
-
-              private fun text(b: Bundle?) =
-                  b?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.lowercase() ?: ""
-
-              private fun listen() {
-                  handled = false
-                  val i = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-                      .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                      .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "de-DE")
-                      .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                      .putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
-                  sr?.startListening(i)
-              }
-
-              private fun process(t: String, final: Boolean) {
-                  if (handled || t.isBlank()) return
-                  val idx = t.indexOf(Cfg.WAKE)
-                  if (idx < 0 && !awake) return
-                  if (!awake) { awake = true; showOrb() }
-                  h.removeCallbacks(timeout)
-                  h.postDelayed(timeout, 7000)
-                  val cmd = if (idx >= 0) t.substring(idx + Cfg.WAKE.length) else t
-                  val app = Apps.find(this, cmd, !final)
-                  if (app != null) {
-                      handled = true
-                      Apps.open(this, app)
-                      hideOrb()
+              // Jede Sekunde: nur wenn eine geblockte App offen ist und der Bildschirm an ist, läuft die Zeit
+              private val tick = object : Runnable {
+                  override fun run() {
+                      val pm = getSystemService(POWER_SERVICE) as PowerManager
+                      if (inBlockedApp && pm.isInteractive) {
+                          val left = maxOf(0L, Store.budget(this@BlockerService) - 1000)
+                          Store.setBudget(this@BlockerService, left)
+                          if (left == 0L) { inBlockedApp = false; kick() }
+                      }
+                      h.postDelayed(this, 1000)
                   }
               }
 
-              private fun showOrb() {
-                  if (orb != null) return
-                  val o = Orb(this)
-                  val lp = WindowManager.LayoutParams(
-                      dp(240), dp(240),
-                      WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                          WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                          WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-                      PixelFormat.TRANSLUCENT
-                  )
-                  lp.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-                  lp.y = dp(48)
-                  o.alpha = 0f; o.scaleX = 0.5f; o.scaleY = 0.5f
-                  (getSystemService(Context.WINDOW_SERVICE) as WindowManager).addView(o, lp)
-                  o.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(260)
-                      .setInterpolator(OvershootInterpolator(1.4f)).start()
-                  orb = o
+              override fun onServiceConnected() {
+                  h.post(tick)
+                  val sm = getSystemService(SENSOR_SERVICE) as SensorManager
+                  sm.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)?.let { sm.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL) }
               }
 
-              private fun hideOrb() {
-                  awake = false
-                  h.removeCallbacks(timeout)
-                  val o = orb ?: return
-                  orb = null
-                  o.animate().alpha(0f).scaleX(0.5f).scaleY(0.5f).setDuration(200).withEndAction {
-                      try { (getSystemService(Context.WINDOW_SERVICE) as WindowManager).removeView(o) } catch (_: Exception) {}
-                  }.start()
+              override fun onSensorChanged(e: SensorEvent) = Store.onSteps(this, e.values[0])
+              override fun onAccuracyChanged(s: Sensor?, a: Int) {}
+
+              private fun neutral(pkg: String) = pkg == "com.android.systemui" || pkg.contains("inputmethod") || pkg.contains("keyboard")
+
+              override fun onAccessibilityEvent(e: AccessibilityEvent) {
+                  val pkg = e.packageName?.toString() ?: return
+                  if (pkg in Store.blocked) {
+                      if (Store.locked(this)) { inBlockedApp = false; kick() } else inBlockedApp = true
+                      return
+                  }
+                  if (!neutral(pkg)) inBlockedApp = false
+
+                  val dpm = getSystemService(DEVICE_POLICY_SERVICE) as DevicePolicyManager
+                  val setupDone = dpm.isAdminActive(ComponentName(this, AdminReceiver::class.java))
+                  if (setupDone && (pkg == "com.android.settings" || pkg.contains("packageinstaller") || pkg.contains("permissioncontroller"))) {
+                      val root = rootInActiveWindow ?: return
+                      if (root.findAccessibilityNodeInfosByText("Discipline").isNotEmpty()) kick()
+                  }
               }
 
-              override fun onDestroy() {
-                  sr?.destroy()
-                  hideOrb()
-                  super.onDestroy()
+              private fun kick() {
+                  performGlobalAction(GLOBAL_ACTION_HOME)
+                  startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
               }
+              override fun onInterrupt() {}
           }
-          EOF
+          EOF_FILE
 
-          cat > $K/MainActivity.kt <<'EOF'
-          package com.flora.app
+      - name: "Datei app/src/main/java/com/discipline/app/Challenges.kt"
+        run: |
+          mkdir -p app/src/main/java/com/discipline/app
+          cat > app/src/main/java/com/discipline/app/Challenges.kt <<'EOF_FILE'
+          package com.discipline.app
+          import androidx.compose.ui.graphics.Color
 
+          enum class Ex { PUSHUP, SQUAT, WALK }
+
+          data class Ch(val id: String, val ex: Ex, val goal: Int, val limitMin: Int, val rewardMin: Int, val tier: Int) {
+              val title: String get() = when (ex) {
+                  Ex.PUSHUP -> "$goal LIEGESTÜTZE"
+                  Ex.SQUAT -> "$goal KNIEBEUGEN"
+                  Ex.WALK -> "$goal KM LAUFEN"
+              } + if (limitMin > 0) " IN $limitMin MIN" else ""
+          }
+
+          const val MAX_BUDGET_MIN = 120
+          val TIER_NAMES = listOf("LEICHT", "MITTEL", "SCHWER", "EXTREM")
+          val TIER_COLORS = listOf(Color(0xFFB6FF00), Color(0xFFFFD400), Color(0xFFFF8A00), Color(0xFFFF2D2D))
+
+          // Hier kannst du Aufgaben anpassen: Ch(id, Übung, Ziel, Zeitlimit in Min (0 = keins), Belohnung in Min, Stufe)
+          val CHALLENGES = listOf(
+              Ch("p10", Ex.PUSHUP, 10, 0, 30, 0), Ch("s20", Ex.SQUAT, 20, 0, 30, 0), Ch("w2", Ex.WALK, 2, 0, 30, 0),
+              Ch("p25", Ex.PUSHUP, 25, 0, 45, 1), Ch("s40", Ex.SQUAT, 40, 0, 45, 1), Ch("w5", Ex.WALK, 5, 0, 60, 1),
+              Ch("p50", Ex.PUSHUP, 50, 10, 60, 2), Ch("s100", Ex.SQUAT, 100, 10, 60, 2), Ch("w10", Ex.WALK, 10, 0, 90, 2),
+              Ch("p100", Ex.PUSHUP, 100, 20, 120, 3), Ch("s200", Ex.SQUAT, 200, 20, 120, 3), Ch("w15", Ex.WALK, 15, 0, 120, 3),
+          )
+          EOF_FILE
+
+      - name: "Datei app/src/main/java/com/discipline/app/ExerciseActivity.kt"
+        run: |
+          mkdir -p app/src/main/java/com/discipline/app
+          cat > app/src/main/java/com/discipline/app/ExerciseActivity.kt <<'EOF_FILE'
+          package com.discipline.app
           import android.Manifest
-          import android.app.Activity
-          import android.content.Intent
           import android.content.pm.PackageManager
-          import android.graphics.Color
-          import android.graphics.drawable.ColorDrawable
-          import android.graphics.drawable.GradientDrawable
-          import android.net.Uri
-          import android.os.Build
+          import android.graphics.PointF
           import android.os.Bundle
-          import android.provider.Settings
-          import android.view.Gravity
-          import android.view.View
-          import android.view.ViewGroup
-          import android.widget.*
+          import android.view.WindowManager
+          import android.widget.Toast
+          import androidx.activity.ComponentActivity
+          import androidx.activity.compose.setContent
+          import androidx.activity.result.contract.ActivityResultContracts
+          import androidx.camera.core.*
+          import androidx.camera.lifecycle.ProcessCameraProvider
+          import androidx.camera.view.PreviewView
+          import androidx.compose.foundation.background
+          import androidx.compose.foundation.border
+          import androidx.compose.foundation.layout.*
+          import androidx.compose.foundation.shape.RoundedCornerShape
+          import androidx.compose.material3.Text
+          import androidx.compose.runtime.*
+          import androidx.compose.ui.Alignment
+          import androidx.compose.ui.Modifier
+          import androidx.compose.ui.draw.clip
+          import androidx.compose.ui.graphics.Color
+          import androidx.compose.ui.platform.LocalLifecycleOwner
+          import androidx.compose.ui.text.font.FontWeight
+          import androidx.compose.ui.unit.dp
+          import androidx.compose.ui.unit.sp
+          import androidx.compose.ui.viewinterop.AndroidView
+          import androidx.core.content.ContextCompat
+          import com.google.mlkit.vision.common.InputImage
+          import com.google.mlkit.vision.pose.Pose
+          import com.google.mlkit.vision.pose.PoseDetection
+          import com.google.mlkit.vision.pose.PoseLandmark as PL
+          import com.google.mlkit.vision.pose.defaults.PoseDetectorOptions
+          import kotlinx.coroutines.delay
+          import java.util.concurrent.Executors
+          import kotlin.math.abs
+          import kotlin.math.atan2
 
-          class MainActivity : Activity() {
-              private var asked = false
-              private lateinit var grid: GridView
+          class ExerciseActivity : ComponentActivity() {
+              private lateinit var ch: Ch
+              private val reps = mutableIntStateOf(0)
+              private val depth = mutableFloatStateOf(0f)
+              private val hint = mutableStateOf("")
+              private val granted = mutableStateOf(false)
+              private val leftSec = mutableIntStateOf(-1)
+              private var startMs = 0L
+              private var down = false
+              private var finished = false
+              private val exec = Executors.newSingleThreadExecutor()
+              private val detector = PoseDetection.getClient(
+                  PoseDetectorOptions.Builder().setDetectorMode(PoseDetectorOptions.STREAM_MODE).build())
+              private val askCam = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted.value = it }
 
               override fun onCreate(b: Bundle?) {
                   super.onCreate(b)
-                  window.setBackgroundDrawable(ColorDrawable(0x22000000))
-                  if (Build.VERSION.SDK_INT >= 31) window.setBackgroundBlurRadius(Cfg.BLUR)
-
-                  val root = FrameLayout(this)
-                  grid = GridView(this).apply {
-                      numColumns = 4
-                      verticalSpacing = dp(22)
-                      selector = ColorDrawable(Color.TRANSPARENT)
-                      clipToPadding = false
-                      setPadding(dp(14), dp(64), dp(14), dp(130))
-                      isVerticalScrollBarEnabled = false
+                  window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                  ch = CHALLENGES.firstOrNull { it.id == intent.getStringExtra("id") } ?: CHALLENGES[0]
+                  hint.value = if (ch.ex == Ex.PUSHUP) "Handy seitlich auf den Boden, Plank-Position" else "Handy seitlich aufstellen, ganzer Körper im Bild"
+                  granted.value = checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+                  if (!granted.value) askCam.launch(Manifest.permission.CAMERA)
+                  setContent {
+                      if (granted.value) Screen() else Text("Kamera-Erlaubnis nötig", color = Color.White, modifier = Modifier.padding(40.dp))
                   }
-                  root.addView(grid, ViewGroup.LayoutParams(-1, -1))
+              }
 
-                  val dock = TextView(this).apply {
-                      text = "●  Sag „Hey Flora“"
-                      setTextColor(Color.WHITE)
-                      textSize = 15f
-                      gravity = Gravity.CENTER
-                      setPadding(dp(28), dp(16), dp(28), dp(16))
-                      background = GradientDrawable().apply {
-                          cornerRadius = dp(32).toFloat()
-                          setColor(Cfg.DOCK_FILL)
-                          setStroke(dp(1), Cfg.DOCK_STROKE)
+              override fun onDestroy() { detector.close(); exec.shutdown(); super.onDestroy() }
+
+              private fun ang(a: PointF, b: PointF, c: PointF): Double {
+                  val r = atan2((c.y - b.y).toDouble(), (c.x - b.x).toDouble()) - atan2((a.y - b.y).toDouble(), (a.x - b.x).toDouble())
+                  var d = Math.toDegrees(abs(r)); if (d > 180) d = 360 - d; return d
+              }
+
+              private fun pick(p: Pose, l: IntArray, r: IntArray): List<PointF>? {
+                  fun conf(s: IntArray) = s.sumOf { (p.getPoseLandmark(it)?.inFrameLikelihood ?: 0f).toDouble() }
+                  val s = if (conf(l) >= conf(r)) l else r
+                  val pts = s.map { p.getPoseLandmark(it) }
+                  if (pts.any { it == null || it.inFrameLikelihood < 0.5f }) return null
+                  return pts.map { it!!.position }
+              }
+
+              @OptIn(ExperimentalGetImage::class)
+              private fun analyze(px: ImageProxy) {
+                  val img = px.image
+                  if (img == null) { px.close(); return }
+                  detector.process(InputImage.fromMediaImage(img, px.imageInfo.rotationDegrees))
+                      .addOnSuccessListener { onPose(it) }
+                      .addOnCompleteListener { px.close() }
+              }
+
+              private fun onPose(p: Pose) {
+                  if (finished) return
+                  if (ch.ex == Ex.PUSHUP) {
+                      val pts = pick(p, intArrayOf(PL.LEFT_SHOULDER, PL.LEFT_ELBOW, PL.LEFT_WRIST, PL.LEFT_HIP, PL.LEFT_ANKLE),
+                          intArrayOf(PL.RIGHT_SHOULDER, PL.RIGHT_ELBOW, PL.RIGHT_WRIST, PL.RIGHT_HIP, PL.RIGHT_ANKLE))
+                      if (pts == null) { hint.value = "Ganzer Körper muss seitlich im Bild sein"; return }
+                      val (sh, el, wr, hip, an) = pts
+                      val tilt = Math.toDegrees(abs(atan2((an.y - sh.y).toDouble(), (an.x - sh.x).toDouble())))
+                      if (!(tilt < 35 || tilt > 145) || ang(sh, hip, an) < 150) { hint.value = "Plank: Körper gerade & waagerecht"; return }
+                      step(ang(sh, el, wr), 85.0, 160.0)
+                  } else {
+                      val pts = pick(p, intArrayOf(PL.LEFT_SHOULDER, PL.LEFT_HIP, PL.LEFT_KNEE, PL.LEFT_ANKLE),
+                          intArrayOf(PL.RIGHT_SHOULDER, PL.RIGHT_HIP, PL.RIGHT_KNEE, PL.RIGHT_ANKLE))
+                      if (pts == null) { hint.value = "Ganzer Körper muss seitlich im Bild sein"; return }
+                      val (sh, hip, kn, an) = pts
+                      if (abs(sh.y - hip.y) < abs(sh.x - hip.x)) { hint.value = "Aufrecht stehen, seitlich zur Kamera"; return }
+                      step(ang(hip, kn, an), 95.0, 165.0)
+                  }
+              }
+
+              private fun step(a: Double, low: Double, high: Double) {
+                  depth.floatValue = ((high + 5 - a) / (high + 5 - low)).toFloat().coerceIn(0f, 1f)
+                  if (a < low && !down) { down = true; hint.value = "TIEF GENUG - jetzt hoch!" }
+                  else if (a > high && down) { down = false; rep() }
+                  else if (!down && a < high - 10) hint.value = "TIEFER!"
+              }
+
+              private fun rep() {
+                  if (startMs == 0L) startMs = System.currentTimeMillis()   // Zeitlimit startet mit der 1. Wiederholung
+                  reps.intValue++; hint.value = "Sauber!"
+                  if (reps.intValue >= ch.goal) {
+                      finished = true; Store.addBudget(this, ch.rewardMin)
+                      Toast.makeText(this, "FREIGESCHALTET +${ch.rewardMin} Min", Toast.LENGTH_LONG).show()
+                      finish()
+                  }
+              }
+
+              @Composable
+              fun Screen() {
+                  val owner = LocalLifecycleOwner.current
+                  LaunchedEffect(Unit) {
+                      while (true) {
+                          if (startMs > 0 && ch.limitMin > 0 && !finished) {
+                              val l = ch.limitMin * 60 - ((System.currentTimeMillis() - startMs) / 1000).toInt()
+                              leftSec.intValue = l
+                              if (l <= 0) { finished = true; Toast.makeText(this@ExerciseActivity, "ZEIT ABGELAUFEN - nochmal!", Toast.LENGTH_LONG).show(); finish() }
+                          }
+                          delay(500)
                       }
                   }
-                  root.addView(dock, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = dp(36) })
-                  setContentView(root)
+                  Box(Modifier.fillMaxSize().background(Color.Black)) {
+                      AndroidView(modifier = Modifier.fillMaxSize(), factory = { c ->
+                          val pv = PreviewView(c)
+                          val fut = ProcessCameraProvider.getInstance(c)
+                          fut.addListener({
+                              val prev = Preview.Builder().build().also { it.setSurfaceProvider(pv.surfaceProvider) }
+                              val ia = ImageAnalysis.Builder().setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST).build()
+                                  .also { it.setAnalyzer(exec) { px -> analyze(px) } }
+                              val prov = fut.get(); prov.unbindAll()
+                              prov.bindToLifecycle(owner, CameraSelector.DEFAULT_FRONT_CAMERA, prev, ia)
+                          }, ContextCompat.getMainExecutor(c))
+                          pv
+                      })
+                      Column(Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(20.dp),
+                          horizontalAlignment = Alignment.CenterHorizontally) {
+                          Text("${reps.intValue} / ${ch.goal}", color = LIME, fontSize = 64.sp, fontWeight = FontWeight.Black)
+                          if (ch.limitMin > 0) {
+                              val l = if (leftSec.intValue < 0) ch.limitMin * 60 else leftSec.intValue
+                              Text("%d:%02d".format(l / 60, l % 60), color = if (l < 60) RED else Color.White, fontSize = 28.sp, fontWeight = FontWeight.Black)
+                          }
+                          Text(hint.value, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold,
+                              modifier = Modifier.background(Color(0x77000000), RoundedCornerShape(20.dp)).glass(Color.White, 20.dp).padding(14.dp))
+                      }
+                      val full = depth.floatValue >= 1f
+                      Box(Modifier.align(Alignment.CenterEnd).padding(end = 18.dp).width(34.dp).fillMaxHeight(.6f)
+                          .background(Color(0x77000000), RoundedCornerShape(17.dp)).glass(if (full) LIME else Color.White, 17.dp)) {
+                          Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(depth.floatValue)
+                              .background(if (full) LIME else RED))
+                      }
+                  }
+              }
+          }
+          EOF_FILE
+
+      - name: "Datei app/src/main/java/com/discipline/app/Glass.kt"
+        run: |
+          mkdir -p app/src/main/java/com/discipline/app
+          cat > app/src/main/java/com/discipline/app/Glass.kt <<'EOF_FILE'
+          package com.discipline.app
+          import androidx.compose.foundation.background
+          import androidx.compose.foundation.border
+          import androidx.compose.foundation.clickable
+          import androidx.compose.foundation.layout.*
+          import androidx.compose.foundation.shape.RoundedCornerShape
+          import androidx.compose.material3.Text
+          import androidx.compose.runtime.Composable
+          import androidx.compose.ui.Alignment
+          import androidx.compose.ui.Modifier
+          import androidx.compose.ui.draw.clip
+          import androidx.compose.ui.draw.drawBehind
+          import androidx.compose.ui.geometry.Offset
+          import androidx.compose.ui.graphics.Brush
+          import androidx.compose.ui.graphics.Color
+          import androidx.compose.ui.text.font.FontWeight
+          import androidx.compose.ui.unit.Dp
+          import androidx.compose.ui.unit.dp
+          import androidx.compose.ui.unit.sp
+
+          // Liquid-Glass: milchig-transparente Fläche + Lichtkante oben links
+          fun Modifier.glass(tint: Color = Color.White, radius: Dp = 28.dp): Modifier {
+              val shape = RoundedCornerShape(radius)
+              return this.clip(shape)
+                  .background(Brush.linearGradient(listOf(tint.copy(alpha = .17f), tint.copy(alpha = .05f))))
+                  .border(1.dp, Brush.linearGradient(listOf(Color.White.copy(alpha = .6f), Color.White.copy(alpha = .05f), tint.copy(alpha = .3f))), shape)
+          }
+
+          // Dunkler Hintergrund mit weichen, leuchtenden Farbkugeln (scheinen durch das Glas)
+          fun Modifier.liquidBackground(): Modifier = this.background(Color(0xFF05060D)).drawBehind {
+              fun orb(c: Color, x: Float, y: Float, r: Float) =
+                  drawCircle(Brush.radialGradient(listOf(c, Color.Transparent), Offset(x, y), r), r, Offset(x, y))
+              orb(Color(0x77B6FF00), size.width * .1f, size.height * .08f, size.width * .95f)
+              orb(Color(0x666A5CFF), size.width * .95f, size.height * .45f, size.width * 1.0f)
+              orb(Color(0x55FF2D55), size.width * .05f, size.height * .92f, size.width * .9f)
+          }
+
+          @Composable
+          fun GlassButton(text: String, color: Color = LIME, enabled: Boolean = true,
+                          modifier: Modifier = Modifier.fillMaxWidth(), onClick: () -> Unit) {
+              val c = if (enabled) color else Color(0x66FFFFFF)
+              Box(modifier.glass(c, 50.dp).clickable(enabled = enabled, onClick = onClick).padding(vertical = 14.dp, horizontal = 20.dp),
+                  contentAlignment = Alignment.Center) {
+                  Text(text, color = c, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, letterSpacing = 1.5.sp)
+              }
+          }
+          EOF_FILE
+
+      - name: "Datei app/src/main/java/com/discipline/app/MainActivity.kt"
+        run: |
+          mkdir -p app/src/main/java/com/discipline/app
+          cat > app/src/main/java/com/discipline/app/MainActivity.kt <<'EOF_FILE'
+          package com.discipline.app
+          import android.Manifest
+          import android.app.admin.DevicePolicyManager
+          import android.content.ComponentName
+          import android.content.Intent
+          import android.content.pm.PackageManager
+          import android.hardware.Sensor
+          import android.hardware.SensorEvent
+          import android.hardware.SensorEventListener
+          import android.hardware.SensorManager
+          import android.os.Bundle
+          import android.provider.Settings
+          import androidx.activity.ComponentActivity
+          import androidx.activity.compose.setContent
+          import androidx.compose.foundation.*
+          import androidx.compose.foundation.layout.*
+          import androidx.compose.foundation.shape.RoundedCornerShape
+          import androidx.compose.material3.*
+          import androidx.compose.runtime.*
+          import androidx.compose.ui.Alignment
+          import androidx.compose.ui.Modifier
+          import androidx.compose.ui.draw.clip
+          import androidx.compose.ui.graphics.Color
+          import androidx.compose.ui.text.font.FontWeight
+          import androidx.compose.ui.unit.dp
+          import androidx.compose.ui.unit.sp
+          import kotlinx.coroutines.delay
+          import org.json.JSONArray
+          import org.json.JSONObject
+          import java.net.HttpURLConnection
+          import java.net.URL
+
+          val LIME = Color(0xFFB6FF00)
+          val RED = Color(0xFFFF4D6A)
+          val SOFT = Color(0xAAFFFFFF)
+
+          class MainActivity : ComponentActivity(), SensorEventListener {
+              private lateinit var sm: SensorManager
+
+              override fun onCreate(b: Bundle?) {
+                  super.onCreate(b)
+                  sm = getSystemService(SENSOR_SERVICE) as SensorManager
+                  setContent { Screen() }
               }
 
               override fun onResume() {
                   super.onResume()
-                  val apps = Apps.list(this, true)
-                  grid.adapter = object : BaseAdapter() {
-                      override fun getCount() = apps.size
-                      override fun getItem(p: Int) = apps[p]
-                      override fun getItemId(p: Int) = p.toLong()
-                      override fun getView(p: Int, v: View?, parent: ViewGroup): View {
-                          val a = apps[p]
-                          val img = ImageView(this@MainActivity).apply {
-                              setImageBitmap(Glass.icon(a.pkg, a.icon, dp(120)))
-                          }
-                          val tv = TextView(this@MainActivity).apply {
-                              text = a.label
-                              setTextColor(Color.WHITE)
-                              textSize = 11f
-                              maxLines = 1
-                              gravity = Gravity.CENTER
-                              setShadowLayer(6f, 0f, 2f, 0x99000000.toInt())
-                          }
-                          return LinearLayout(this@MainActivity).apply {
-                              orientation = LinearLayout.VERTICAL
-                              gravity = Gravity.CENTER_HORIZONTAL
-                              addView(img, LinearLayout.LayoutParams(dp(60), dp(60)))
-                              addView(tv, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
-                              setOnClickListener { Apps.open(this@MainActivity, a) }
-                          }
-                      }
-                  }
-                  checkSetup()
+                  if (checkSelfPermission(Manifest.permission.ACTIVITY_RECOGNITION) != PackageManager.PERMISSION_GRANTED)
+                      requestPermissions(arrayOf(Manifest.permission.ACTIVITY_RECOGNITION), 1)
+                  sm.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)?.let { sm.registerListener(this, it, SensorManager.SENSOR_DELAY_UI) }
               }
 
-              private fun checkSetup() {
-                  if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-                      if (!asked) {
-                          asked = true
-                          val p = if (Build.VERSION.SDK_INT >= 33)
-                              arrayOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.POST_NOTIFICATIONS)
-                          else arrayOf(Manifest.permission.RECORD_AUDIO)
-                          requestPermissions(p, 1)
+              override fun onPause() { sm.unregisterListener(this); super.onPause() }
+              override fun onAccuracyChanged(s: Sensor?, a: Int) {}
+              override fun onSensorChanged(e: SensorEvent) = Store.onSteps(this, e.values[0])
+
+              // Schickt die Domain-Liste an den DNS-Blocker im Heimnetz (netblocker.py)
+              private fun push(srv: String, token: String, domains: List<String>, done: (String) -> Unit) {
+                  Thread {
+                      val msg = try {
+                          val c = URL("http://${srv.trim()}:8053/update").openConnection() as HttpURLConnection
+                          c.requestMethod = "POST"; c.connectTimeout = 4000; c.readTimeout = 4000; c.doOutput = true
+                          c.setRequestProperty("X-Token", token.trim()); c.setRequestProperty("Content-Type", "application/json")
+                          c.outputStream.use { it.write(JSONObject().put("domains", JSONArray(domains)).toString().toByteArray()) }
+                          if (c.responseCode == 200) "Gesendet: ${domains.size} Domains aktiv" else "Fehler ${c.responseCode} (Token?)"
+                      } catch (e: Exception) { "Server nicht erreichbar" }
+                      runOnUiThread { done(msg) }
+                  }.start()
+              }
+
+              @Composable
+              fun Screen() {
+                  var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+                  LaunchedEffect(Unit) { while (true) { now = System.currentTimeMillis(); delay(1000) } }
+                  val tick = now   // liest den State, damit jede Sekunde neu gezeichnet wird
+                  val left = Store.budget(this)
+                  val locked = left <= 0
+                  val km = Store.kmToday(this)
+                  val a11y = Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
+                      ?.contains(packageName) == true
+                  val comp = ComponentName(this, AdminReceiver::class.java)
+                  val admin = (getSystemService(DEVICE_POLICY_SERVICE) as DevicePolicyManager).isAdminActive(comp)
+                  val accent = if (locked) RED else LIME
+
+                  var srv by remember { mutableStateOf(Store.server(this)) }
+                  var tok by remember { mutableStateOf(Store.token(this)) }
+                  var newDom by remember { mutableStateOf("") }
+                  var status by remember { mutableStateOf("") }
+                  val initial = Store.domains(this)
+                  val domains = remember { mutableStateListOf(*initial.toTypedArray()) }
+                  fun sync() {
+                      Store.setDomains(this, domains.toList()); Store.setNet(this, srv, tok)
+                      if (srv.isNotBlank() && tok.isNotBlank()) push(srv, tok, domains.toList()) { status = it }
+                      else status = "Server-IP und Token eintragen"
+                  }
+                  val fc = OutlinedTextFieldDefaults.colors(
+                      focusedTextColor = Color.White, unfocusedTextColor = Color.White,
+                      focusedBorderColor = LIME.copy(alpha = .8f), unfocusedBorderColor = Color(0x33FFFFFF),
+                      focusedLabelColor = LIME, unfocusedLabelColor = SOFT, cursorColor = LIME,
+                      focusedContainerColor = Color(0x0DFFFFFF), unfocusedContainerColor = Color(0x0DFFFFFF))
+                  val fieldShape = RoundedCornerShape(20.dp)
+
+                  Column(
+                      Modifier.fillMaxSize().liquidBackground()
+                          .verticalScroll(rememberScrollState()).statusBarsPadding().navigationBarsPadding().padding(20.dp),
+                      verticalArrangement = Arrangement.spacedBy(14.dp)
+                  ) {
+                      Column(Modifier.padding(top = 8.dp)) {
+                          Text("Discipline", color = Color.White, fontSize = 38.sp, fontWeight = FontWeight.Light, letterSpacing = 1.sp)
+                          Text("Kein Scrollen ohne Leistung.", color = SOFT, fontSize = 15.sp)
                       }
-                  } else if (!Settings.canDrawOverlays(this)) {
-                      if (!asked) {
-                          asked = true
-                          Toast.makeText(this, "Bitte „Über anderen Apps einblenden“ erlauben", Toast.LENGTH_LONG).show()
-                          startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+
+                      Column(Modifier.fillMaxWidth().glass(accent, 34.dp).padding(26.dp)) {
+                          Text(if (locked) "GESPERRT" else "FREI", color = accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 4.sp)
+                          Text(if (locked) "0:00" else "%d:%02d".format(left / 60000, left / 1000 % 60),
+                              color = Color.White, fontSize = 68.sp, fontWeight = FontWeight.Thin)
+                          Text(if (locked) "Wähle eine Challenge - je härter, desto mehr In-App-Zeit."
+                              else "In-App-Zeit. Zählt nur, solange du in den Apps bist.", color = SOFT, fontSize = 15.sp)
                       }
-                  } else {
-                      startForegroundService(Intent(this, WakeService::class.java))
+
+                      for (t in TIER_NAMES.indices) {
+                          Text(TIER_NAMES[t], color = TIER_COLORS[t], fontWeight = FontWeight.SemiBold, letterSpacing = 4.sp,
+                              fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp, start = 6.dp))
+                          for (c in CHALLENGES.filter { it.tier == t }) {
+                              if (c.ex == Ex.WALK) {
+                                  val done = Store.claimed(this, c.id)
+                                  GlassCard(c.title, "%.2f / %d km heute  ·  +%d Min".format(km, c.goal, c.rewardMin), km / c.goal,
+                                      TIER_COLORS[t], km >= c.goal && !done,
+                                      if (done) "HEUTE EINGELÖST" else if (km >= c.goal) "EINLÖSEN" else "NOCH %.2f KM".format(c.goal - km)) {
+                                      Store.claimWalk(this, c)
+                                  }
+                              } else {
+                                  GlassCard(c.title, "Kamera-KI prüft jede Wiederholung  ·  +%d Min".format(c.rewardMin), null,
+                                      TIER_COLORS[t], true, "STARTEN") {
+                                      startActivity(Intent(this, ExerciseActivity::class.java).putExtra("id", c.id))
+                                  }
+                              }
+                          }
+                      }
+
+                      Column(Modifier.fillMaxWidth().padding(top = 10.dp).glass(Color.White, 30.dp).padding(20.dp),
+                          verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                          Text("NETZWERK-BLOCKER", color = Color.White, fontWeight = FontWeight.SemiBold, letterSpacing = 3.sp, fontSize = 14.sp)
+                          Text("Blockt Websites auf allen Geräten im WLAN. Braucht netblocker.py auf einem Rechner/Pi im Netz, dessen IP im Router als DNS eingetragen ist.",
+                              color = SOFT, fontSize = 14.sp)
+                          OutlinedTextField(srv, { srv = it }, label = { Text("Server-IP, z.B. 192.168.178.20") }, singleLine = true,
+                              colors = fc, shape = fieldShape, modifier = Modifier.fillMaxWidth())
+                          OutlinedTextField(tok, { tok = it }, label = { Text("Token (steht in token.txt)") }, singleLine = true,
+                              colors = fc, shape = fieldShape, modifier = Modifier.fillMaxWidth())
+                          Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                              OutlinedTextField(newDom, { newDom = it }, label = { Text("Domain, z.B. tiktok.com") }, singleLine = true,
+                                  colors = fc, shape = fieldShape, modifier = Modifier.weight(1f))
+                              GlassButton("+", modifier = Modifier) {
+                                  val d = newDom.trim().lowercase().removePrefix("https://").removePrefix("http://").removePrefix("www.").substringBefore("/")
+                                  if (d.isNotBlank() && d !in domains) { domains.add(d); newDom = ""; sync() }
+                              }
+                          }
+                          for (d in domains.toList()) {
+                              Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                  Text(d, color = Color.White, modifier = Modifier.weight(1f))
+                                  TextButton({ domains.remove(d); sync() }, enabled = !locked) {
+                                      Text("ENTFERNEN", color = if (locked) Color(0x44FFFFFF) else RED, fontSize = 12.sp, letterSpacing = 1.sp)
+                                  }
+                              }
+                          }
+                          if (domains.isNotEmpty() && locked)
+                              Text("Entfernen geht nur mit In-App-Zeit (nach einer Challenge).", color = SOFT, fontSize = 13.sp)
+                          GlassButton("AN NETZWERK SENDEN", Color.White) { sync() }
+                          if (status.isNotBlank()) Text(status, color = LIME, fontSize = 14.sp)
+                      }
+
+                      if (!a11y || !admin) {
+                          Column(Modifier.fillMaxWidth().glass(LIME, 30.dp).padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                              Text("SETUP", color = Color.White, fontWeight = FontWeight.SemiBold, letterSpacing = 3.sp, fontSize = 14.sp)
+                              if (!a11y) GlassButton("1  BLOCKER AKTIVIEREN") { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+                              if (!admin) GlassButton("2  DEINSTALLATIONSSCHUTZ") {
+                                  startActivity(Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
+                                      .putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, comp)
+                                      .putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Schützt Discipline vor Deinstallation."))
+                              }
+                          }
+                      }
+                      Spacer(Modifier.height(24.dp))
                   }
               }
 
-              override fun onRequestPermissionsResult(r: Int, p: Array<out String>, g: IntArray) {
-                  asked = false
+              @Composable
+              fun GlassCard(title: String, sub: String, progress: Float?, color: Color, enabled: Boolean, label: String, click: () -> Unit) {
+                  Column(Modifier.fillMaxWidth().glass(if (enabled) color else Color.White, 28.dp).padding(20.dp),
+                      verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                      Text(title, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                      Text(sub, color = SOFT, fontSize = 14.sp)
+                      if (progress != null) Box(Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)).background(Color(0x22FFFFFF))) {
+                          Box(Modifier.fillMaxHeight().fillMaxWidth(progress.coerceIn(0f, 1f)).background(color))
+                      }
+                      GlassButton(label, color, enabled, onClick = click)
+                  }
               }
           }
-          EOF
+          EOF_FILE
+
+      - name: "Datei app/src/main/java/com/discipline/app/Store.kt"
+        run: |
+          mkdir -p app/src/main/java/com/discipline/app
+          cat > app/src/main/java/com/discipline/app/Store.kt <<'EOF_FILE'
+          package com.discipline.app
+          import android.content.Context
+          import java.time.LocalDate
+
+          object Store {
+              val blocked = setOf(
+                  "com.instagram.android", "com.zhiliaoapp.musically", "com.ss.android.ugc.trill",
+                  "com.snapchat.android", "com.facebook.katana", "com.twitter.android",
+                  "com.google.android.youtube", "com.reddit.frontpage"
+              )
+              private fun p(c: Context) = c.getSharedPreferences("d", Context.MODE_PRIVATE)
+              private fun today() = LocalDate.now().toString()
+
+              // In-App-Zeit: läuft nur, solange eine geblockte App im Vordergrund ist
+              fun budget(c: Context) = p(c).getLong("b", 0L)
+              fun setBudget(c: Context, ms: Long) = p(c).edit().putLong("b", ms).apply()
+              fun addBudget(c: Context, min: Int) = setBudget(c, minOf(budget(c) + min * 60000L, MAX_BUDGET_MIN * 60000L))
+              fun locked(c: Context) = budget(c) <= 0L
+
+              // Schritte des Tages
+              fun onSteps(c: Context, total: Float) {
+                  val sp = p(c); val e = sp.edit()
+                  var s = sp.getFloat("s", 0f); val last = sp.getFloat("l", -1f)
+                  if (sp.getString("d", "") != today()) { s = 0f; e.putString("d", today()) }
+                  val delta = if (last < 0) 0f else if (total >= last) total - last else total
+                  e.putFloat("s", s + delta).putFloat("l", total).apply()
+              }
+              fun kmToday(c: Context) = if (p(c).getString("d", "") == today()) p(c).getFloat("s", 0f) * 0.00076f else 0f
+              fun claimed(c: Context, id: String) = p(c).getString("c_$id", "") == today()
+              fun claimWalk(c: Context, ch: Ch) { p(c).edit().putString("c_${ch.id}", today()).apply(); addBudget(c, ch.rewardMin) }
+
+              // Netzwerk-Blocker (Server im Heimnetz)
+              fun server(c: Context) = p(c).getString("srv", "") ?: ""
+              fun token(c: Context) = p(c).getString("tok", "") ?: ""
+              fun setNet(c: Context, srv: String, tok: String) = p(c).edit().putString("srv", srv).putString("tok", tok).apply()
+              fun domains(c: Context): List<String> = (p(c).getString("dom", "") ?: "").split("\n").filter { it.isNotBlank() }
+              fun setDomains(c: Context, l: List<String>) = p(c).edit().putString("dom", l.joinToString("\n")).apply()
+          }
+          EOF_FILE
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: 8.7
 
       - name: APK bauen
-        run: gradle assembleDebug --no-daemon
+        run: gradle assembleDebug --stacktrace
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Flora-APK
+          name: Discipline-APK
           path: app/build/outputs/apk/debug/app-debug.apk

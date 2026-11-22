@@ -690,16 +690,16 @@ jobs:
                               fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp, start = 6.dp))
                           for (c in CHALLENGES.filter { it.tier == t }) {
                               if (c.ex == Ex.WALK) {
-                                  val done = Store.claimed(this, c.id)
+                                  val done = Store.claimed(this@MainActivity, c.id)
                                   GlassCard(c.title, "%.2f / %d km heute  ·  +%d Min".format(km, c.goal, c.rewardMin), km / c.goal,
                                       TIER_COLORS[t], km >= c.goal && !done,
                                       if (done) "HEUTE EINGELÖST" else if (km >= c.goal) "EINLÖSEN" else "NOCH %.2f KM".format(c.goal - km)) {
-                                      Store.claimWalk(this, c)
+                                      Store.claimWalk(this@MainActivity, c)
                                   }
                               } else {
                                   GlassCard(c.title, "Kamera-KI prüft jede Wiederholung  ·  +%d Min".format(c.rewardMin), null,
                                       TIER_COLORS[t], true, "STARTEN") {
-                                      startActivity(Intent(this, ExerciseActivity::class.java).putExtra("id", c.id))
+                                      startActivity(Intent(this@MainActivity, ExerciseActivity::class.java).putExtra("id", c.id))
                                   }
                               }
                           }
@@ -810,7 +810,7 @@ jobs:
           }
           EOF_FILE
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 17

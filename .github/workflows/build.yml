@@ -1,841 +1,290 @@
-# Discipline - komplette App in einer Datei.
-# Diese Datei als .github/workflows/build.yml in ein leeres GitHub-Repo legen.
-# Dann: Actions -> "Build APK" -> Run workflow -> APK unter "Artifacts" laden.
-name: Build APK
+# Speichere diese Datei als .github/workflows/build.yml in einem GitHub-Repository.
+# Danach: Actions -> "Fristo APK bauen" -> Run workflow. Die fertige APK liegt unter "Artifacts".
+name: Fristo APK bauen
 
 on:
-  push:
   workflow_dispatch:
+  push:
+    branches: [main, master]
 
 jobs:
-  build:
+  apk:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-
-      - name: "Datei app/build.gradle.kts"
-        run: |
-          mkdir -p app
-          cat > app/build.gradle.kts <<'EOF_FILE'
-          plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }
-          android {
-              namespace = "com.discipline.app"
-              compileSdk = 34
-              defaultConfig { applicationId = "com.discipline.app"; minSdk = 26; targetSdk = 34; versionCode = 1; versionName = "1.0" }
-              compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
-              kotlinOptions { jvmTarget = "17" }
-              buildFeatures { compose = true }
-              composeOptions { kotlinCompilerExtensionVersion = "1.5.14" }
-          }
-          dependencies {
-              implementation(platform("androidx.compose:compose-bom:2024.06.00"))
-              implementation("androidx.core:core-ktx:1.13.1")
-              implementation("androidx.activity:activity-compose:1.9.0")
-              implementation("androidx.compose.ui:ui")
-              implementation("androidx.compose.material3:material3")
-              implementation("androidx.camera:camera-core:1.3.4")
-              implementation("androidx.camera:camera-camera2:1.3.4")
-              implementation("androidx.camera:camera-lifecycle:1.3.4")
-              implementation("androidx.camera:camera-view:1.3.4")
-              implementation("com.google.mlkit:pose-detection:18.0.0-beta4")
-          }
-          EOF_FILE
-
-      - name: "Datei build.gradle.kts"
-        run: |
-          mkdir -p .
-          cat > build.gradle.kts <<'EOF_FILE'
-          plugins {
-              id("com.android.application") version "8.5.2" apply false
-              id("org.jetbrains.kotlin.android") version "1.9.24" apply false
-          }
-          EOF_FILE
-
-      - name: "Datei gradle.properties"
-        run: |
-          mkdir -p .
-          cat > gradle.properties <<'EOF_FILE'
-          android.useAndroidX=true
-          EOF_FILE
-
-      - name: "Datei settings.gradle.kts"
-        run: |
-          mkdir -p .
-          cat > settings.gradle.kts <<'EOF_FILE'
-          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
-          dependencyResolutionManagement { repositories { google(); mavenCentral() } }
-          rootProject.name = "Discipline"
-          include(":app")
-          EOF_FILE
-
-      - name: "Datei app/src/main/AndroidManifest.xml"
-        run: |
-          mkdir -p app/src/main
-          cat > app/src/main/AndroidManifest.xml <<'EOF_FILE'
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION"/>
-              <uses-permission android:name="android.permission.CAMERA"/>
-              <uses-permission android:name="android.permission.INTERNET"/>
-              <application android:usesCleartextTraffic="true" android:label="Discipline" android:icon="@mipmap/ic_launcher"
-                  android:roundIcon="@mipmap/ic_launcher" android:theme="@style/Theme.Discipline">
-                  <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTask">
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN"/>
-                          <category android:name="android.intent.category.LAUNCHER"/>
-                      </intent-filter>
-                  </activity>
-                  <activity android:name=".ExerciseActivity" android:exported="false"/>
-                  <service android:name=".BlockerService" android:exported="true"
-                      android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
-                      <intent-filter><action android:name="android.accessibilityservice.AccessibilityService"/></intent-filter>
-                      <meta-data android:name="android.accessibilityservice" android:resource="@xml/accessibility"/>
-                  </service>
-                  <receiver android:name=".AdminReceiver" android:exported="true"
-                      android:permission="android.permission.BIND_DEVICE_ADMIN">
-                      <intent-filter><action android:name="android.app.action.DEVICE_ADMIN_ENABLED"/></intent-filter>
-                      <meta-data android:name="android.app.device_admin" android:resource="@xml/device_admin"/>
-                  </receiver>
-              </application>
-          </manifest>
-          EOF_FILE
-
-      - name: "Datei app/src/main/res/drawable/ic_bg.xml"
-        run: |
-          mkdir -p app/src/main/res/drawable
-          cat > app/src/main/res/drawable/ic_bg.xml <<'EOF_FILE'
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              xmlns:aapt="http://schemas.android.com/aapt"
-              android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
-              <path android:pathData="M0,0h108v108h-108z">
-                  <aapt:attr name="android:fillColor">
-                      <gradient android:type="linear" android:startX="0" android:startY="0" android:endX="108" android:endY="108"
-                          android:startColor="#0E1424" android:endColor="#05060D"/>
-                  </aapt:attr>
-              </path>
-              <path android:pathData="M-4,34 a34,34 0 1,0 68,0 a34,34 0 1,0 -68,0 z">
-                  <aapt:attr name="android:fillColor">
-                      <gradient android:type="radial" android:centerX="30" android:centerY="34" android:gradientRadius="36"
-                          android:startColor="#88B6FF00" android:endColor="#00B6FF00"/>
-                  </aapt:attr>
-              </path>
-              <path android:pathData="M42,80 a40,40 0 1,0 80,0 a40,40 0 1,0 -80,0 z">
-                  <aapt:attr name="android:fillColor">
-                      <gradient android:type="radial" android:centerX="82" android:centerY="80" android:gradientRadius="42"
-                          android:startColor="#776A5CFF" android:endColor="#006A5CFF"/>
-                  </aapt:attr>
-              </path>
-          </vector>
-          EOF_FILE
-
-      - name: "Datei app/src/main/res/drawable/ic_fg.xml"
-        run: |
-          mkdir -p app/src/main/res/drawable
-          cat > app/src/main/res/drawable/ic_fg.xml <<'EOF_FILE'
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              xmlns:aapt="http://schemas.android.com/aapt"
-              android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
-              <path android:pathData="M54,24 L80,39 L80,69 L54,84 L28,69 L28,39 Z" android:strokeWidth="1.6">
-                  <aapt:attr name="android:fillColor">
-                      <gradient android:type="linear" android:startX="28" android:startY="24" android:endX="80" android:endY="84"
-                          android:startColor="#44FFFFFF" android:endColor="#0DFFFFFF"/>
-                  </aapt:attr>
-                  <aapt:attr name="android:strokeColor">
-                      <gradient android:type="linear" android:startX="28" android:startY="24" android:endX="80" android:endY="84"
-                          android:startColor="#CCFFFFFF" android:endColor="#55B6FF00"/>
-                  </aapt:attr>
-              </path>
-              <path android:pathData="M33,41 L54,29 L70,38" android:strokeColor="#88FFFFFF" android:strokeWidth="1.2"
-                  android:strokeLineCap="round" android:fillColor="#00000000"/>
-              <path android:pathData="M59,34 L44,57 L53,57 L49,76 L66,50 L56,50 Z">
-                  <aapt:attr name="android:fillColor">
-                      <gradient android:type="linear" android:startX="44" android:startY="34" android:endX="66" android:endY="76"
-                          android:startColor="#D8FF4D" android:endColor="#00E5A0"/>
-                  </aapt:attr>
-              </path>
-          </vector>
-          EOF_FILE
-
-      - name: "Datei app/src/main/res/drawable/ic_mono.xml"
-        run: |
-          mkdir -p app/src/main/res/drawable
-          cat > app/src/main/res/drawable/ic_mono.xml <<'EOF_FILE'
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
-              <path android:pathData="M54,24 L80,39 L80,69 L54,84 L28,69 L28,39 Z" android:strokeColor="#FFFFFF" android:strokeWidth="3" android:fillColor="#00000000"/>
-              <path android:pathData="M59,34 L44,57 L53,57 L49,76 L66,50 L56,50 Z" android:fillColor="#FFFFFF"/>
-          </vector>
-          EOF_FILE
-
-      - name: "Datei app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml"
-        run: |
-          mkdir -p app/src/main/res/mipmap-anydpi-v26
-          cat > app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml <<'EOF_FILE'
-          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-              <background android:drawable="@drawable/ic_bg"/>
-              <foreground android:drawable="@drawable/ic_fg"/>
-              <monochrome android:drawable="@drawable/ic_mono"/>
-          </adaptive-icon>
-          EOF_FILE
-
-      - name: "Datei app/src/main/res/values/strings.xml"
-        run: |
-          mkdir -p app/src/main/res/values
-          cat > app/src/main/res/values/strings.xml <<'EOF_FILE'
-          <resources>
-              <string name="app_name">Discipline</string>
-              <string name="a11y_desc">Blockiert Social-Media-Apps, bis du deine Challenge erledigt hast.</string>
-          </resources>
-          EOF_FILE
-
-      - name: "Datei app/src/main/res/values/themes.xml"
-        run: |
-          mkdir -p app/src/main/res/values
-          cat > app/src/main/res/values/themes.xml <<'EOF_FILE'
-          <resources>
-              <style name="Theme.Discipline" parent="android:Theme.Material.NoActionBar">
-                  <item name="android:windowBackground">#05060D</item>
-                  <item name="android:statusBarColor">#05060D</item>
-                  <item name="android:navigationBarColor">#05060D</item>
-              </style>
-          </resources>
-          EOF_FILE
-
-      - name: "Datei app/src/main/res/xml/accessibility.xml"
-        run: |
-          mkdir -p app/src/main/res/xml
-          cat > app/src/main/res/xml/accessibility.xml <<'EOF_FILE'
-          <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-              android:accessibilityEventTypes="typeWindowStateChanged"
-              android:accessibilityFeedbackType="feedbackGeneric"
-              android:canRetrieveWindowContent="true"
-              android:notificationTimeout="100"
-              android:description="@string/a11y_desc"/>
-          EOF_FILE
-
-      - name: "Datei app/src/main/res/xml/device_admin.xml"
-        run: |
-          mkdir -p app/src/main/res/xml
-          cat > app/src/main/res/xml/device_admin.xml <<'EOF_FILE'
-          <device-admin xmlns:android="http://schemas.android.com/apk/res/android">
-              <uses-policies><force-lock/></uses-policies>
-          </device-admin>
-          EOF_FILE
-
-      - name: "Datei app/src/main/java/com/discipline/app/AdminReceiver.kt"
-        run: |
-          mkdir -p app/src/main/java/com/discipline/app
-          cat > app/src/main/java/com/discipline/app/AdminReceiver.kt <<'EOF_FILE'
-          package com.discipline.app
-          import android.app.admin.DeviceAdminReceiver
-          class AdminReceiver : DeviceAdminReceiver()
-          EOF_FILE
-
-      - name: "Datei app/src/main/java/com/discipline/app/BlockerService.kt"
-        run: |
-          mkdir -p app/src/main/java/com/discipline/app
-          cat > app/src/main/java/com/discipline/app/BlockerService.kt <<'EOF_FILE'
-          package com.discipline.app
-          import android.accessibilityservice.AccessibilityService
-          import android.app.admin.DevicePolicyManager
-          import android.content.ComponentName
-          import android.content.Intent
-          import android.hardware.Sensor
-          import android.hardware.SensorEvent
-          import android.hardware.SensorEventListener
-          import android.hardware.SensorManager
-          import android.os.Handler
-          import android.os.Looper
-          import android.os.PowerManager
-          import android.view.accessibility.AccessibilityEvent
-
-          class BlockerService : AccessibilityService(), SensorEventListener {
-              private val h = Handler(Looper.getMainLooper())
-              private var inBlockedApp = false
-
-              // Jede Sekunde: nur wenn eine geblockte App offen ist und der Bildschirm an ist, läuft die Zeit
-              private val tick = object : Runnable {
-                  override fun run() {
-                      val pm = getSystemService(POWER_SERVICE) as PowerManager
-                      if (inBlockedApp && pm.isInteractive) {
-                          val left = maxOf(0L, Store.budget(this@BlockerService) - 1000)
-                          Store.setBudget(this@BlockerService, left)
-                          if (left == 0L) { inBlockedApp = false; kick() }
-                      }
-                      h.postDelayed(this, 1000)
-                  }
-              }
-
-              override fun onServiceConnected() {
-                  h.post(tick)
-                  val sm = getSystemService(SENSOR_SERVICE) as SensorManager
-                  sm.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)?.let { sm.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL) }
-              }
-
-              override fun onSensorChanged(e: SensorEvent) = Store.onSteps(this, e.values[0])
-              override fun onAccuracyChanged(s: Sensor?, a: Int) {}
-
-              private fun neutral(pkg: String) = pkg == "com.android.systemui" || pkg.contains("inputmethod") || pkg.contains("keyboard")
-
-              override fun onAccessibilityEvent(e: AccessibilityEvent) {
-                  val pkg = e.packageName?.toString() ?: return
-                  if (pkg in Store.blocked) {
-                      if (Store.locked(this)) { inBlockedApp = false; kick() } else inBlockedApp = true
-                      return
-                  }
-                  if (!neutral(pkg)) inBlockedApp = false
-
-                  val dpm = getSystemService(DEVICE_POLICY_SERVICE) as DevicePolicyManager
-                  val setupDone = dpm.isAdminActive(ComponentName(this, AdminReceiver::class.java))
-                  if (setupDone && (pkg == "com.android.settings" || pkg.contains("packageinstaller") || pkg.contains("permissioncontroller"))) {
-                      val root = rootInActiveWindow ?: return
-                      if (root.findAccessibilityNodeInfosByText("Discipline").isNotEmpty()) kick()
-                  }
-              }
-
-              private fun kick() {
-                  performGlobalAction(GLOBAL_ACTION_HOME)
-                  startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-              }
-              override fun onInterrupt() {}
-          }
-          EOF_FILE
-
-      - name: "Datei app/src/main/java/com/discipline/app/Challenges.kt"
-        run: |
-          mkdir -p app/src/main/java/com/discipline/app
-          cat > app/src/main/java/com/discipline/app/Challenges.kt <<'EOF_FILE'
-          package com.discipline.app
-          import androidx.compose.ui.graphics.Color
-
-          enum class Ex { PUSHUP, SQUAT, WALK }
-
-          data class Ch(val id: String, val ex: Ex, val goal: Int, val limitMin: Int, val rewardMin: Int, val tier: Int) {
-              val title: String get() = when (ex) {
-                  Ex.PUSHUP -> "$goal LIEGESTÜTZE"
-                  Ex.SQUAT -> "$goal KNIEBEUGEN"
-                  Ex.WALK -> "$goal KM LAUFEN"
-              } + if (limitMin > 0) " IN $limitMin MIN" else ""
-          }
-
-          const val MAX_BUDGET_MIN = 120
-          val TIER_NAMES = listOf("LEICHT", "MITTEL", "SCHWER", "EXTREM")
-          val TIER_COLORS = listOf(Color(0xFFB6FF00), Color(0xFFFFD400), Color(0xFFFF8A00), Color(0xFFFF2D2D))
-
-          // Hier kannst du Aufgaben anpassen: Ch(id, Übung, Ziel, Zeitlimit in Min (0 = keins), Belohnung in Min, Stufe)
-          val CHALLENGES = listOf(
-              Ch("p10", Ex.PUSHUP, 10, 0, 30, 0), Ch("s20", Ex.SQUAT, 20, 0, 30, 0), Ch("w2", Ex.WALK, 2, 0, 30, 0),
-              Ch("p25", Ex.PUSHUP, 25, 0, 45, 1), Ch("s40", Ex.SQUAT, 40, 0, 45, 1), Ch("w5", Ex.WALK, 5, 0, 60, 1),
-              Ch("p50", Ex.PUSHUP, 50, 10, 60, 2), Ch("s100", Ex.SQUAT, 100, 10, 60, 2), Ch("w10", Ex.WALK, 10, 0, 90, 2),
-              Ch("p100", Ex.PUSHUP, 100, 20, 120, 3), Ch("s200", Ex.SQUAT, 200, 20, 120, 3), Ch("w15", Ex.WALK, 15, 0, 120, 3),
-          )
-          EOF_FILE
-
-      - name: "Datei app/src/main/java/com/discipline/app/ExerciseActivity.kt"
-        run: |
-          mkdir -p app/src/main/java/com/discipline/app
-          cat > app/src/main/java/com/discipline/app/ExerciseActivity.kt <<'EOF_FILE'
-          package com.discipline.app
-          import android.Manifest
-          import android.content.pm.PackageManager
-          import android.graphics.PointF
-          import android.os.Bundle
-          import android.view.WindowManager
-          import android.widget.Toast
-          import androidx.activity.ComponentActivity
-          import androidx.activity.compose.setContent
-          import androidx.activity.result.contract.ActivityResultContracts
-          import androidx.camera.core.*
-          import androidx.camera.lifecycle.ProcessCameraProvider
-          import androidx.camera.view.PreviewView
-          import androidx.compose.foundation.background
-          import androidx.compose.foundation.border
-          import androidx.compose.foundation.layout.*
-          import androidx.compose.foundation.shape.RoundedCornerShape
-          import androidx.compose.material3.Text
-          import androidx.compose.runtime.*
-          import androidx.compose.ui.Alignment
-          import androidx.compose.ui.Modifier
-          import androidx.compose.ui.draw.clip
-          import androidx.compose.ui.graphics.Color
-          import androidx.compose.ui.platform.LocalLifecycleOwner
-          import androidx.compose.ui.text.font.FontWeight
-          import androidx.compose.ui.unit.dp
-          import androidx.compose.ui.unit.sp
-          import androidx.compose.ui.viewinterop.AndroidView
-          import androidx.core.content.ContextCompat
-          import com.google.mlkit.vision.common.InputImage
-          import com.google.mlkit.vision.pose.Pose
-          import com.google.mlkit.vision.pose.PoseDetection
-          import com.google.mlkit.vision.pose.PoseLandmark as PL
-          import com.google.mlkit.vision.pose.defaults.PoseDetectorOptions
-          import kotlinx.coroutines.delay
-          import java.util.concurrent.Executors
-          import kotlin.math.abs
-          import kotlin.math.atan2
-
-          class ExerciseActivity : ComponentActivity() {
-              private lateinit var ch: Ch
-              private val reps = mutableIntStateOf(0)
-              private val depth = mutableFloatStateOf(0f)
-              private val hint = mutableStateOf("")
-              private val granted = mutableStateOf(false)
-              private val leftSec = mutableIntStateOf(-1)
-              private var startMs = 0L
-              private var down = false
-              private var finished = false
-              private val exec = Executors.newSingleThreadExecutor()
-              private val detector = PoseDetection.getClient(
-                  PoseDetectorOptions.Builder().setDetectorMode(PoseDetectorOptions.STREAM_MODE).build())
-              private val askCam = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted.value = it }
-
-              override fun onCreate(b: Bundle?) {
-                  super.onCreate(b)
-                  window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                  ch = CHALLENGES.firstOrNull { it.id == intent.getStringExtra("id") } ?: CHALLENGES[0]
-                  hint.value = if (ch.ex == Ex.PUSHUP) "Handy seitlich auf den Boden, Plank-Position" else "Handy seitlich aufstellen, ganzer Körper im Bild"
-                  granted.value = checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
-                  if (!granted.value) askCam.launch(Manifest.permission.CAMERA)
-                  setContent {
-                      if (granted.value) Screen() else Text("Kamera-Erlaubnis nötig", color = Color.White, modifier = Modifier.padding(40.dp))
-                  }
-              }
-
-              override fun onDestroy() { detector.close(); exec.shutdown(); super.onDestroy() }
-
-              private fun ang(a: PointF, b: PointF, c: PointF): Double {
-                  val r = atan2((c.y - b.y).toDouble(), (c.x - b.x).toDouble()) - atan2((a.y - b.y).toDouble(), (a.x - b.x).toDouble())
-                  var d = Math.toDegrees(abs(r)); if (d > 180) d = 360 - d; return d
-              }
-
-              private fun pick(p: Pose, l: IntArray, r: IntArray): List<PointF>? {
-                  fun conf(s: IntArray) = s.sumOf { (p.getPoseLandmark(it)?.inFrameLikelihood ?: 0f).toDouble() }
-                  val s = if (conf(l) >= conf(r)) l else r
-                  val pts = s.map { p.getPoseLandmark(it) }
-                  if (pts.any { it == null || it.inFrameLikelihood < 0.5f }) return null
-                  return pts.map { it!!.position }
-              }
-
-              @OptIn(ExperimentalGetImage::class)
-              private fun analyze(px: ImageProxy) {
-                  val img = px.image
-                  if (img == null) { px.close(); return }
-                  detector.process(InputImage.fromMediaImage(img, px.imageInfo.rotationDegrees))
-                      .addOnSuccessListener { onPose(it) }
-                      .addOnCompleteListener { px.close() }
-              }
-
-              private fun onPose(p: Pose) {
-                  if (finished) return
-                  if (ch.ex == Ex.PUSHUP) {
-                      val pts = pick(p, intArrayOf(PL.LEFT_SHOULDER, PL.LEFT_ELBOW, PL.LEFT_WRIST, PL.LEFT_HIP, PL.LEFT_ANKLE),
-                          intArrayOf(PL.RIGHT_SHOULDER, PL.RIGHT_ELBOW, PL.RIGHT_WRIST, PL.RIGHT_HIP, PL.RIGHT_ANKLE))
-                      if (pts == null) { hint.value = "Ganzer Körper muss seitlich im Bild sein"; return }
-                      val (sh, el, wr, hip, an) = pts
-                      val tilt = Math.toDegrees(abs(atan2((an.y - sh.y).toDouble(), (an.x - sh.x).toDouble())))
-                      if (!(tilt < 35 || tilt > 145) || ang(sh, hip, an) < 150) { hint.value = "Plank: Körper gerade & waagerecht"; return }
-                      step(ang(sh, el, wr), 85.0, 160.0)
-                  } else {
-                      val pts = pick(p, intArrayOf(PL.LEFT_SHOULDER, PL.LEFT_HIP, PL.LEFT_KNEE, PL.LEFT_ANKLE),
-                          intArrayOf(PL.RIGHT_SHOULDER, PL.RIGHT_HIP, PL.RIGHT_KNEE, PL.RIGHT_ANKLE))
-                      if (pts == null) { hint.value = "Ganzer Körper muss seitlich im Bild sein"; return }
-                      val (sh, hip, kn, an) = pts
-                      if (abs(sh.y - hip.y) < abs(sh.x - hip.x)) { hint.value = "Aufrecht stehen, seitlich zur Kamera"; return }
-                      step(ang(hip, kn, an), 95.0, 165.0)
-                  }
-              }
-
-              private fun step(a: Double, low: Double, high: Double) {
-                  depth.floatValue = ((high + 5 - a) / (high + 5 - low)).toFloat().coerceIn(0f, 1f)
-                  if (a < low && !down) { down = true; hint.value = "TIEF GENUG - jetzt hoch!" }
-                  else if (a > high && down) { down = false; rep() }
-                  else if (!down && a < high - 10) hint.value = "TIEFER!"
-              }
-
-              private fun rep() {
-                  if (startMs == 0L) startMs = System.currentTimeMillis()   // Zeitlimit startet mit der 1. Wiederholung
-                  reps.intValue++; hint.value = "Sauber!"
-                  if (reps.intValue >= ch.goal) {
-                      finished = true; Store.addBudget(this, ch.rewardMin)
-                      Toast.makeText(this, "FREIGESCHALTET +${ch.rewardMin} Min", Toast.LENGTH_LONG).show()
-                      finish()
-                  }
-              }
-
-              @Composable
-              fun Screen() {
-                  val owner = LocalLifecycleOwner.current
-                  LaunchedEffect(Unit) {
-                      while (true) {
-                          if (startMs > 0 && ch.limitMin > 0 && !finished) {
-                              val l = ch.limitMin * 60 - ((System.currentTimeMillis() - startMs) / 1000).toInt()
-                              leftSec.intValue = l
-                              if (l <= 0) { finished = true; Toast.makeText(this@ExerciseActivity, "ZEIT ABGELAUFEN - nochmal!", Toast.LENGTH_LONG).show(); finish() }
-                          }
-                          delay(500)
-                      }
-                  }
-                  Box(Modifier.fillMaxSize().background(Color.Black)) {
-                      AndroidView(modifier = Modifier.fillMaxSize(), factory = { c ->
-                          val pv = PreviewView(c)
-                          val fut = ProcessCameraProvider.getInstance(c)
-                          fut.addListener({
-                              val prev = Preview.Builder().build().also { it.setSurfaceProvider(pv.surfaceProvider) }
-                              val ia = ImageAnalysis.Builder().setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST).build()
-                                  .also { it.setAnalyzer(exec) { px -> analyze(px) } }
-                              val prov = fut.get(); prov.unbindAll()
-                              prov.bindToLifecycle(owner, CameraSelector.DEFAULT_FRONT_CAMERA, prev, ia)
-                          }, ContextCompat.getMainExecutor(c))
-                          pv
-                      })
-                      Column(Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(20.dp),
-                          horizontalAlignment = Alignment.CenterHorizontally) {
-                          Text("${reps.intValue} / ${ch.goal}", color = LIME, fontSize = 64.sp, fontWeight = FontWeight.Black)
-                          if (ch.limitMin > 0) {
-                              val l = if (leftSec.intValue < 0) ch.limitMin * 60 else leftSec.intValue
-                              Text("%d:%02d".format(l / 60, l % 60), color = if (l < 60) RED else Color.White, fontSize = 28.sp, fontWeight = FontWeight.Black)
-                          }
-                          Text(hint.value, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold,
-                              modifier = Modifier.background(Color(0x77000000), RoundedCornerShape(20.dp)).glass(Color.White, 20.dp).padding(14.dp))
-                      }
-                      val full = depth.floatValue >= 1f
-                      Box(Modifier.align(Alignment.CenterEnd).padding(end = 18.dp).width(34.dp).fillMaxHeight(.6f)
-                          .background(Color(0x77000000), RoundedCornerShape(17.dp)).glass(if (full) LIME else Color.White, 17.dp)) {
-                          Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(depth.floatValue)
-                              .background(if (full) LIME else RED))
-                      }
-                  }
-              }
-          }
-          EOF_FILE
-
-      - name: "Datei app/src/main/java/com/discipline/app/Glass.kt"
-        run: |
-          mkdir -p app/src/main/java/com/discipline/app
-          cat > app/src/main/java/com/discipline/app/Glass.kt <<'EOF_FILE'
-          package com.discipline.app
-          import androidx.compose.foundation.background
-          import androidx.compose.foundation.border
-          import androidx.compose.foundation.clickable
-          import androidx.compose.foundation.layout.*
-          import androidx.compose.foundation.shape.RoundedCornerShape
-          import androidx.compose.material3.Text
-          import androidx.compose.runtime.Composable
-          import androidx.compose.ui.Alignment
-          import androidx.compose.ui.Modifier
-          import androidx.compose.ui.draw.clip
-          import androidx.compose.ui.draw.drawBehind
-          import androidx.compose.ui.geometry.Offset
-          import androidx.compose.ui.graphics.Brush
-          import androidx.compose.ui.graphics.Color
-          import androidx.compose.ui.text.font.FontWeight
-          import androidx.compose.ui.unit.Dp
-          import androidx.compose.ui.unit.dp
-          import androidx.compose.ui.unit.sp
-
-          // Liquid-Glass: milchig-transparente Fläche + Lichtkante oben links
-          fun Modifier.glass(tint: Color = Color.White, radius: Dp = 28.dp): Modifier {
-              val shape = RoundedCornerShape(radius)
-              return this.clip(shape)
-                  .background(Brush.linearGradient(listOf(tint.copy(alpha = .17f), tint.copy(alpha = .05f))))
-                  .border(1.dp, Brush.linearGradient(listOf(Color.White.copy(alpha = .6f), Color.White.copy(alpha = .05f), tint.copy(alpha = .3f))), shape)
-          }
-
-          // Dunkler Hintergrund mit weichen, leuchtenden Farbkugeln (scheinen durch das Glas)
-          fun Modifier.liquidBackground(): Modifier = this.background(Color(0xFF05060D)).drawBehind {
-              fun orb(c: Color, x: Float, y: Float, r: Float) =
-                  drawCircle(Brush.radialGradient(listOf(c, Color.Transparent), Offset(x, y), r), r, Offset(x, y))
-              orb(Color(0x77B6FF00), size.width * .1f, size.height * .08f, size.width * .95f)
-              orb(Color(0x666A5CFF), size.width * .95f, size.height * .45f, size.width * 1.0f)
-              orb(Color(0x55FF2D55), size.width * .05f, size.height * .92f, size.width * .9f)
-          }
-
-          @Composable
-          fun GlassButton(text: String, color: Color = LIME, enabled: Boolean = true,
-                          modifier: Modifier = Modifier.fillMaxWidth(), onClick: () -> Unit) {
-              val c = if (enabled) color else Color(0x66FFFFFF)
-              Box(modifier.glass(c, 50.dp).clickable(enabled = enabled, onClick = onClick).padding(vertical = 14.dp, horizontal = 20.dp),
-                  contentAlignment = Alignment.Center) {
-                  Text(text, color = c, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, letterSpacing = 1.5.sp)
-              }
-          }
-          EOF_FILE
-
-      - name: "Datei app/src/main/java/com/discipline/app/MainActivity.kt"
-        run: |
-          mkdir -p app/src/main/java/com/discipline/app
-          cat > app/src/main/java/com/discipline/app/MainActivity.kt <<'EOF_FILE'
-          package com.discipline.app
-          import android.Manifest
-          import android.app.admin.DevicePolicyManager
-          import android.content.ComponentName
-          import android.content.Intent
-          import android.content.pm.PackageManager
-          import android.hardware.Sensor
-          import android.hardware.SensorEvent
-          import android.hardware.SensorEventListener
-          import android.hardware.SensorManager
-          import android.os.Bundle
-          import android.provider.Settings
-          import androidx.activity.ComponentActivity
-          import androidx.activity.compose.setContent
-          import androidx.compose.foundation.*
-          import androidx.compose.foundation.layout.*
-          import androidx.compose.foundation.shape.RoundedCornerShape
-          import androidx.compose.material3.*
-          import androidx.compose.runtime.*
-          import androidx.compose.ui.Alignment
-          import androidx.compose.ui.Modifier
-          import androidx.compose.ui.draw.clip
-          import androidx.compose.ui.graphics.Color
-          import androidx.compose.ui.text.font.FontWeight
-          import androidx.compose.ui.unit.dp
-          import androidx.compose.ui.unit.sp
-          import kotlinx.coroutines.delay
-          import org.json.JSONArray
-          import org.json.JSONObject
-          import java.net.HttpURLConnection
-          import java.net.URL
-
-          val LIME = Color(0xFFB6FF00)
-          val RED = Color(0xFFFF4D6A)
-          val SOFT = Color(0xAAFFFFFF)
-
-          class MainActivity : ComponentActivity(), SensorEventListener {
-              private lateinit var sm: SensorManager
-
-              override fun onCreate(b: Bundle?) {
-                  super.onCreate(b)
-                  sm = getSystemService(SENSOR_SERVICE) as SensorManager
-                  setContent { Screen() }
-              }
-
-              override fun onResume() {
-                  super.onResume()
-                  if (checkSelfPermission(Manifest.permission.ACTIVITY_RECOGNITION) != PackageManager.PERMISSION_GRANTED)
-                      requestPermissions(arrayOf(Manifest.permission.ACTIVITY_RECOGNITION), 1)
-                  sm.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)?.let { sm.registerListener(this, it, SensorManager.SENSOR_DELAY_UI) }
-              }
-
-              override fun onPause() { sm.unregisterListener(this); super.onPause() }
-              override fun onAccuracyChanged(s: Sensor?, a: Int) {}
-              override fun onSensorChanged(e: SensorEvent) = Store.onSteps(this, e.values[0])
-
-              // Schickt die Domain-Liste an den DNS-Blocker im Heimnetz (netblocker.py)
-              private fun push(srv: String, token: String, domains: List<String>, done: (String) -> Unit) {
-                  Thread {
-                      val msg = try {
-                          val c = URL("http://${srv.trim()}:8053/update").openConnection() as HttpURLConnection
-                          c.requestMethod = "POST"; c.connectTimeout = 4000; c.readTimeout = 4000; c.doOutput = true
-                          c.setRequestProperty("X-Token", token.trim()); c.setRequestProperty("Content-Type", "application/json")
-                          c.outputStream.use { it.write(JSONObject().put("domains", JSONArray(domains)).toString().toByteArray()) }
-                          if (c.responseCode == 200) "Gesendet: ${domains.size} Domains aktiv" else "Fehler ${c.responseCode} (Token?)"
-                      } catch (e: Exception) { "Server nicht erreichbar" }
-                      runOnUiThread { done(msg) }
-                  }.start()
-              }
-
-              @Composable
-              fun Screen() {
-                  var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-                  LaunchedEffect(Unit) { while (true) { now = System.currentTimeMillis(); delay(1000) } }
-                  val tick = now   // liest den State, damit jede Sekunde neu gezeichnet wird
-                  val left = Store.budget(this)
-                  val locked = left <= 0
-                  val km = Store.kmToday(this)
-                  val a11y = Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
-                      ?.contains(packageName) == true
-                  val comp = ComponentName(this, AdminReceiver::class.java)
-                  val admin = (getSystemService(DEVICE_POLICY_SERVICE) as DevicePolicyManager).isAdminActive(comp)
-                  val accent = if (locked) RED else LIME
-
-                  var srv by remember { mutableStateOf(Store.server(this)) }
-                  var tok by remember { mutableStateOf(Store.token(this)) }
-                  var newDom by remember { mutableStateOf("") }
-                  var status by remember { mutableStateOf("") }
-                  val initial = Store.domains(this)
-                  val domains = remember { mutableStateListOf(*initial.toTypedArray()) }
-                  fun sync() {
-                      Store.setDomains(this, domains.toList()); Store.setNet(this, srv, tok)
-                      if (srv.isNotBlank() && tok.isNotBlank()) push(srv, tok, domains.toList()) { status = it }
-                      else status = "Server-IP und Token eintragen"
-                  }
-                  val fc = OutlinedTextFieldDefaults.colors(
-                      focusedTextColor = Color.White, unfocusedTextColor = Color.White,
-                      focusedBorderColor = LIME.copy(alpha = .8f), unfocusedBorderColor = Color(0x33FFFFFF),
-                      focusedLabelColor = LIME, unfocusedLabelColor = SOFT, cursorColor = LIME,
-                      focusedContainerColor = Color(0x0DFFFFFF), unfocusedContainerColor = Color(0x0DFFFFFF))
-                  val fieldShape = RoundedCornerShape(20.dp)
-
-                  Column(
-                      Modifier.fillMaxSize().liquidBackground()
-                          .verticalScroll(rememberScrollState()).statusBarsPadding().navigationBarsPadding().padding(20.dp),
-                      verticalArrangement = Arrangement.spacedBy(14.dp)
-                  ) {
-                      Column(Modifier.padding(top = 8.dp)) {
-                          Text("Discipline", color = Color.White, fontSize = 38.sp, fontWeight = FontWeight.Light, letterSpacing = 1.sp)
-                          Text("Kein Scrollen ohne Leistung.", color = SOFT, fontSize = 15.sp)
-                      }
-
-                      Column(Modifier.fillMaxWidth().glass(accent, 34.dp).padding(26.dp)) {
-                          Text(if (locked) "GESPERRT" else "FREI", color = accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 4.sp)
-                          Text(if (locked) "0:00" else "%d:%02d".format(left / 60000, left / 1000 % 60),
-                              color = Color.White, fontSize = 68.sp, fontWeight = FontWeight.Thin)
-                          Text(if (locked) "Wähle eine Challenge - je härter, desto mehr In-App-Zeit."
-                              else "In-App-Zeit. Zählt nur, solange du in den Apps bist.", color = SOFT, fontSize = 15.sp)
-                      }
-
-                      for (t in TIER_NAMES.indices) {
-                          Text(TIER_NAMES[t], color = TIER_COLORS[t], fontWeight = FontWeight.SemiBold, letterSpacing = 4.sp,
-                              fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp, start = 6.dp))
-                          for (c in CHALLENGES.filter { it.tier == t }) {
-                              if (c.ex == Ex.WALK) {
-                                  val done = Store.claimed(this@MainActivity, c.id)
-                                  GlassCard(c.title, "%.2f / %d km heute  ·  +%d Min".format(km, c.goal, c.rewardMin), km / c.goal,
-                                      TIER_COLORS[t], km >= c.goal && !done,
-                                      if (done) "HEUTE EINGELÖST" else if (km >= c.goal) "EINLÖSEN" else "NOCH %.2f KM".format(c.goal - km)) {
-                                      Store.claimWalk(this@MainActivity, c)
-                                  }
-                              } else {
-                                  GlassCard(c.title, "Kamera-KI prüft jede Wiederholung  ·  +%d Min".format(c.rewardMin), null,
-                                      TIER_COLORS[t], true, "STARTEN") {
-                                      startActivity(Intent(this@MainActivity, ExerciseActivity::class.java).putExtra("id", c.id))
-                                  }
-                              }
-                          }
-                      }
-
-                      Column(Modifier.fillMaxWidth().padding(top = 10.dp).glass(Color.White, 30.dp).padding(20.dp),
-                          verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                          Text("NETZWERK-BLOCKER", color = Color.White, fontWeight = FontWeight.SemiBold, letterSpacing = 3.sp, fontSize = 14.sp)
-                          Text("Blockt Websites auf allen Geräten im WLAN. Braucht netblocker.py auf einem Rechner/Pi im Netz, dessen IP im Router als DNS eingetragen ist.",
-                              color = SOFT, fontSize = 14.sp)
-                          OutlinedTextField(srv, { srv = it }, label = { Text("Server-IP, z.B. 192.168.178.20") }, singleLine = true,
-                              colors = fc, shape = fieldShape, modifier = Modifier.fillMaxWidth())
-                          OutlinedTextField(tok, { tok = it }, label = { Text("Token (steht in token.txt)") }, singleLine = true,
-                              colors = fc, shape = fieldShape, modifier = Modifier.fillMaxWidth())
-                          Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                              OutlinedTextField(newDom, { newDom = it }, label = { Text("Domain, z.B. tiktok.com") }, singleLine = true,
-                                  colors = fc, shape = fieldShape, modifier = Modifier.weight(1f))
-                              GlassButton("+", modifier = Modifier) {
-                                  val d = newDom.trim().lowercase().removePrefix("https://").removePrefix("http://").removePrefix("www.").substringBefore("/")
-                                  if (d.isNotBlank() && d !in domains) { domains.add(d); newDom = ""; sync() }
-                              }
-                          }
-                          for (d in domains.toList()) {
-                              Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                  Text(d, color = Color.White, modifier = Modifier.weight(1f))
-                                  TextButton({ domains.remove(d); sync() }, enabled = !locked) {
-                                      Text("ENTFERNEN", color = if (locked) Color(0x44FFFFFF) else RED, fontSize = 12.sp, letterSpacing = 1.sp)
-                                  }
-                              }
-                          }
-                          if (domains.isNotEmpty() && locked)
-                              Text("Entfernen geht nur mit In-App-Zeit (nach einer Challenge).", color = SOFT, fontSize = 13.sp)
-                          GlassButton("AN NETZWERK SENDEN", Color.White) { sync() }
-                          if (status.isNotBlank()) Text(status, color = LIME, fontSize = 14.sp)
-                      }
-
-                      if (!a11y || !admin) {
-                          Column(Modifier.fillMaxWidth().glass(LIME, 30.dp).padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                              Text("SETUP", color = Color.White, fontWeight = FontWeight.SemiBold, letterSpacing = 3.sp, fontSize = 14.sp)
-                              if (!a11y) GlassButton("1  BLOCKER AKTIVIEREN") { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
-                              if (!admin) GlassButton("2  DEINSTALLATIONSSCHUTZ") {
-                                  startActivity(Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
-                                      .putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, comp)
-                                      .putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Schützt Discipline vor Deinstallation."))
-                              }
-                          }
-                      }
-                      Spacer(Modifier.height(24.dp))
-                  }
-              }
-
-              @Composable
-              fun GlassCard(title: String, sub: String, progress: Float?, color: Color, enabled: Boolean, label: String, click: () -> Unit) {
-                  Column(Modifier.fillMaxWidth().glass(if (enabled) color else Color.White, 28.dp).padding(20.dp),
-                      verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                      Text(title, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-                      Text(sub, color = SOFT, fontSize = 14.sp)
-                      if (progress != null) Box(Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)).background(Color(0x22FFFFFF))) {
-                          Box(Modifier.fillMaxHeight().fillMaxWidth(progress.coerceIn(0f, 1f)).background(color))
-                      }
-                      GlassButton(label, color, enabled, onClick = click)
-                  }
-              }
-          }
-          EOF_FILE
-
-      - name: "Datei app/src/main/java/com/discipline/app/Store.kt"
-        run: |
-          mkdir -p app/src/main/java/com/discipline/app
-          cat > app/src/main/java/com/discipline/app/Store.kt <<'EOF_FILE'
-          package com.discipline.app
-          import android.content.Context
-          import java.time.LocalDate
-
-          object Store {
-              val blocked = setOf(
-                  "com.instagram.android", "com.zhiliaoapp.musically", "com.ss.android.ugc.trill",
-                  "com.snapchat.android", "com.facebook.katana", "com.twitter.android",
-                  "com.google.android.youtube", "com.reddit.frontpage"
-              )
-              private fun p(c: Context) = c.getSharedPreferences("d", Context.MODE_PRIVATE)
-              private fun today() = LocalDate.now().toString()
-
-              // In-App-Zeit: läuft nur, solange eine geblockte App im Vordergrund ist
-              fun budget(c: Context) = p(c).getLong("b", 0L)
-              fun setBudget(c: Context, ms: Long) = p(c).edit().putLong("b", ms).apply()
-              fun addBudget(c: Context, min: Int) = setBudget(c, minOf(budget(c) + min * 60000L, MAX_BUDGET_MIN * 60000L))
-              fun locked(c: Context) = budget(c) <= 0L
-
-              // Schritte des Tages
-              fun onSteps(c: Context, total: Float) {
-                  val sp = p(c); val e = sp.edit()
-                  var s = sp.getFloat("s", 0f); val last = sp.getFloat("l", -1f)
-                  if (sp.getString("d", "") != today()) { s = 0f; e.putString("d", today()) }
-                  val delta = if (last < 0) 0f else if (total >= last) total - last else total
-                  e.putFloat("s", s + delta).putFloat("l", total).apply()
-              }
-              fun kmToday(c: Context) = if (p(c).getString("d", "") == today()) p(c).getFloat("s", 0f) * 0.00076f else 0f
-              fun claimed(c: Context, id: String) = p(c).getString("c_$id", "") == today()
-              fun claimWalk(c: Context, ch: Ch) { p(c).edit().putString("c_${ch.id}", today()).apply(); addBudget(c, ch.rewardMin) }
-
-              // Netzwerk-Blocker (Server im Heimnetz)
-              fun server(c: Context) = p(c).getString("srv", "") ?: ""
-              fun token(c: Context) = p(c).getString("tok", "") ?: ""
-              fun setNet(c: Context, srv: String, tok: String) = p(c).edit().putString("srv", srv).putString("tok", tok).apply()
-              fun domains(c: Context): List<String> = (p(c).getString("dom", "") ?: "").split("\n").filter { it.isNotBlank() }
-              fun setDomains(c: Context, l: List<String>) = p(c).edit().putString("dom", l.joinToString("\n")).apply()
-          }
-          EOF_FILE
-
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
 
-      - uses: gradle/actions/setup-gradle@v3
-        with:
-          gradle-version: 8.7
-          cache-disabled: true
+      - name: App-Code schreiben (index.html und Logo-Generator)
+        run: |
+          mkdir -p app/www && cd app
+          cat > www/index.html <<'EOF'
+          <!DOCTYPE html>
+          <html lang="de"><head><meta charset="utf-8">
+          <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+          <meta name="theme-color" content="#f2f2f4"><title>Fristo</title>
+          <style>
+          :root{--bg:#f2f2f4;--tx:#0e0e10;--tx2:#74747c;--gl:rgba(255,255,255,.6);--gl2:rgba(255,255,255,.88);--bd:rgba(255,255,255,.9);--ln:rgba(0,0,0,.07);--ink:#0e0e10;--on:#fff;--sh:0 8px 30px rgba(0,0,0,.07);--b1:#ffffff;--b2:#dcdce2}
+          @media(prefers-color-scheme:dark){:root{--bg:#0b0b0d;--tx:#f4f4f6;--tx2:#8e8e96;--gl:rgba(38,38,44,.6);--gl2:rgba(44,44,50,.9);--bd:rgba(255,255,255,.1);--ln:rgba(255,255,255,.09);--ink:#f4f4f6;--on:#0e0e10;--sh:0 8px 30px rgba(0,0,0,.45);--b1:#26262c;--b2:#18181c}}
+          *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+          body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.4 -apple-system,BlinkMacSystemFont,"SF Pro Text","Inter","Segoe UI",Roboto,sans-serif;min-height:100vh;overflow-x:hidden;padding-top:env(safe-area-inset-top,0)}
+          .blob{position:fixed;border-radius:50%;filter:blur(80px);z-index:0;pointer-events:none}
+          .b1{width:320px;height:320px;background:var(--b1);top:-90px;right:-100px}
+          .b2{width:300px;height:300px;background:var(--b2);bottom:40px;left:-110px}
+          main{position:relative;z-index:1;max-width:520px;margin:0 auto;padding:18px 18px 130px}
+          .page{display:none}.page.on{display:block;animation:in .4s cubic-bezier(.2,.8,.2,1)}
+          @keyframes in{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+          h1{font-size:32px;letter-spacing:-.9px;margin:4px 0 2px;font-weight:700}
+          h2{font-size:18px;letter-spacing:-.3px;margin:26px 0 12px;font-weight:650}
+          .sub{color:var(--tx2);font-size:15px;margin:0 0 18px}
+          .top{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px}
+          .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:20px;letter-spacing:-.4px}
+          .brand svg{width:34px;height:34px}
+          .glass{background:var(--gl);backdrop-filter:blur(26px) saturate(170%);-webkit-backdrop-filter:blur(26px) saturate(170%);border:1px solid var(--bd);border-radius:28px;box-shadow:var(--sh),inset 0 1px 0 rgba(255,255,255,.4)}
+          .card{padding:20px}
+          .big{font-size:46px;font-weight:700;letter-spacing:-1.8px;line-height:1.05;margin:4px 0}
+          .mut{color:var(--tx2);font-size:14px}
+          .btn{appearance:none;border:1px solid var(--bd);background:var(--gl);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);color:var(--tx);font:inherit;font-weight:620;padding:12px 18px;border-radius:999px;cursor:pointer;box-shadow:0 3px 14px rgba(0,0,0,.07),inset 0 1px 0 rgba(255,255,255,.4);transition:transform .25s cubic-bezier(.3,1.4,.5,1)}
+          .btn:active{transform:scale(.95)}
+          .btn.pri{background:var(--ink);color:var(--on);border-color:transparent}
+          .btn.full{width:100%;display:block;margin-top:10px;padding:15px}
+          .btn.sm{padding:8px 14px;font-size:14px}
+          .btns{display:flex;gap:8px;margin-top:14px}.btns .btn{flex:1;padding:12px 8px}
+          .row{display:flex;align-items:center;gap:14px;padding:14px 16px;cursor:pointer}
+          .row+.row{border-top:1px solid var(--ln)}.row:active{background:var(--ln)}
+          .list{padding:0;overflow:hidden}
+          .ico{width:42px;height:42px;border-radius:14px;background:var(--gl2);display:grid;place-items:center;font-weight:700;flex:none;box-shadow:inset 0 0 0 1px var(--ln)}
+          .grow{flex:1;min-width:0}.grow b{display:block;font-weight:620;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.grow span{color:var(--tx2);font-size:14px}
+          .pill{font-size:13px;font-weight:650;padding:5px 11px;border-radius:999px;white-space:nowrap;background:var(--ln)}
+          .pill.hot{background:var(--ink);color:var(--on)}
+          .chips{display:flex;gap:8px;flex-wrap:wrap}
+          .chip{border:1px solid var(--ln);background:transparent;border-radius:999px;padding:8px 14px;font:inherit;font-size:14px;font-weight:600;color:var(--tx);cursor:pointer}
+          .chip.on{background:var(--ink);color:var(--on);border-color:transparent}
+          .seg{display:inline-flex;background:var(--ln);border-radius:999px;padding:4px;margin-bottom:16px}
+          .seg button{border:0;background:transparent;font:inherit;font-weight:620;font-size:14px;padding:8px 18px;border-radius:999px;color:var(--tx2);cursor:pointer;transition:all .3s}
+          .seg button.on{background:var(--gl2);color:var(--tx);box-shadow:0 2px 10px rgba(0,0,0,.1)}
+          .bar{height:8px;border-radius:4px;background:var(--ln);margin:6px 0 14px;overflow:hidden}.bar i{display:block;height:100%;background:var(--ink);border-radius:4px;transition:width .8s cubic-bezier(.2,.8,.2,1)}
+          .lockbox{position:relative;overflow:hidden}.lockbox .inner{filter:blur(7px);opacity:.55;pointer-events:none}
+          .lockbox .lk{position:absolute;inset:0;display:grid;place-items:center}.lockbox .lk span{background:var(--gl2);border:1px solid var(--bd);padding:9px 16px;border-radius:999px;font-weight:650;font-size:14px}
+          .plan{padding:22px;margin-bottom:14px;position:relative}.plan.feat{outline:1.5px solid var(--ink)}
+          .plan h3{margin:0;font-size:22px;letter-spacing:-.4px}
+          .plan .pr{font-size:36px;font-weight:700;letter-spacing:-1.4px;margin:8px 0 2px}.plan .pr small{font-size:15px;font-weight:500;color:var(--tx2);letter-spacing:0}
+          .plan ul{list-style:none;padding:0;margin:14px 0 6px}.plan li{padding:6px 0 6px 26px;position:relative;font-size:15px}
+          .plan li::before{content:"✓";position:absolute;left:0;font-weight:800}.plan li.no{color:var(--tx2)}.plan li.no::before{content:"–"}
+          nav{position:fixed;left:50%;bottom:0;transform:translateX(-50%);z-index:20;width:min(420px,calc(100% - 28px));margin-bottom:calc(env(safe-area-inset-bottom,0px) + 12px);display:flex;padding:6px;border-radius:999px}
+          nav button{flex:1;border:0;background:transparent;font:inherit;font-size:12px;font-weight:620;color:var(--tx2);padding:11px 0;border-radius:999px;cursor:pointer;transition:all .3s}
+          nav button.on{background:var(--gl2);color:var(--tx);box-shadow:0 2px 12px rgba(0,0,0,.1)}
+          .fab{position:fixed;right:max(18px,calc(50% - 242px));bottom:calc(env(safe-area-inset-bottom,0px) + 90px);z-index:19;width:56px;height:56px;border-radius:50%;font-size:28px;padding:0;display:none}.fab.show{display:block}
+          .veil{position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.25);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);opacity:0;pointer-events:none;transition:opacity .35s}.veil.on{opacity:1;pointer-events:auto}
+          .sheet{position:fixed;left:0;right:0;bottom:0;z-index:41;max-width:520px;margin:0 auto;border-radius:34px 34px 0 0;padding:12px 22px calc(env(safe-area-inset-bottom,0px) + 24px);background:var(--gl2);backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%);border:1px solid var(--bd);border-bottom:0;box-shadow:0 -20px 60px rgba(0,0,0,.18);transform:translateY(105%);transition:transform .5s cubic-bezier(.2,.9,.25,1);max-height:90vh;overflow-y:auto}.sheet.on{transform:none}
+          .grab{width:40px;height:5px;border-radius:3px;background:var(--ln);margin:0 auto 16px}
+          .sheet h3{margin:0 0 4px;font-size:24px;letter-spacing:-.5px}
+          label{display:block;font-size:13px;font-weight:620;color:var(--tx2);margin:14px 0 6px}
+          input,select,textarea{width:100%;font:inherit;color:var(--tx);background:var(--ln);border:1px solid transparent;border-radius:16px;padding:13px 15px;outline:none}
+          input:focus,select:focus,textarea:focus{border-color:var(--ink)}
+          .kv{display:flex;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--ln)}.kv span{color:var(--tx2)}
+          .letter{white-space:pre-wrap;font-size:14px;background:var(--ln);border-radius:18px;padding:16px;margin-top:14px;line-height:1.5}
+          .toast{position:fixed;left:50%;top:calc(env(safe-area-inset-top,0px) + 14px);transform:translate(-50%,-160%);z-index:60;background:var(--gl2);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border:1px solid var(--bd);box-shadow:var(--sh);padding:12px 20px;border-radius:999px;font-weight:620;font-size:14px;transition:transform .5s cubic-bezier(.3,1.3,.5,1);max-width:92vw;text-align:center}.toast.on{transform:translate(-50%,0)}
+          .empty{text-align:center;color:var(--tx2);padding:30px 16px}
+          @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+          button:focus-visible,input:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+          </style></head><body>
+          <div class="blob b1"></div><div class="blob b2"></div>
+          <main><section class="page on" id="p-home"></section><section class="page" id="p-list"></section><section class="page" id="p-war"></section><section class="page" id="p-plans"></section></main>
+          <button class="btn pri fab" id="fab" data-a="add" aria-label="Hinzufügen">+</button>
+          <nav class="glass"><button data-a="tab" data-v="home" class="on">Übersicht</button><button data-a="tab" data-v="list">Verträge</button><button data-a="tab" data-v="war">Garantien</button><button data-a="tab" data-v="plans">Pläne</button></nav>
+          <div class="veil" id="veil" data-a="close"></div><div class="sheet" id="sheet"></div><div class="toast" id="toast"></div>
+          <script>
+          const $=s=>document.querySelector(s),cap=n=>window.Capacitor&&Capacitor.Plugins&&Capacitor.Plugins[n];
+          const eur=n=>n.toLocaleString('de-DE',{style:'currency',currency:'EUR'});
+          const LOGO='<svg viewBox="0 0 100 100"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#34343a"/><stop offset="1" stop-color="#0a0a0c"/></linearGradient><linearGradient id="lr" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#b9b9c2"/></linearGradient></defs><rect width="100" height="100" rx="23" fill="url(#lg)"/><path d="M50 22A28 28 0 1 1 22 50" fill="none" stroke="url(#lr)" stroke-width="8" stroke-linecap="round"/><circle cx="50" cy="50" r="7" fill="#fff"/></svg>';
+          /* ===== Stripe (später aktivieren) =====
+             1) Backend mit Stripe Checkout Session bauen (POST /create-checkout-session -> {url})
+             2) backendUrl eintragen ODER fertige Stripe Payment Links in links eintragen
+             3) Nur der publishable Key gehört in die App, niemals der Secret Key. */
+          const STRIPE={publishableKey:'pk_test_HIER_EINTRAGEN',backendUrl:'',links:{pro_m:'',pro_y:'',ultra_m:'',ultra_y:''}};
+          async function checkout(plan){const key=plan+(S.yearly?'_y':'_m');
+           if(STRIPE.links[key]){openWeb(STRIPE.links[key]);return}
+           if(STRIPE.backendUrl){try{const r=await fetch(STRIPE.backendUrl+'/create-checkout-session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({plan,interval:S.yearly?'year':'month',key:STRIPE.publishableKey})});const j=await r.json();if(j.url){openWeb(j.url);return}}catch(e){}toast('Zahlung gerade nicht erreichbar');return}
+           S.plan=plan;save();close();render();toast(PN[plan]+' im Demo-Modus aktiv. Stripe ist noch nicht verbunden.')}
+          /* Später: Plan per Backend prüfen, z. B. GET backendUrl/subscription-status */
+          const D=s=>{const [y,m,d]=s.split('-').map(Number);return new Date(y,m-1,d)};
+          const iso=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+          const addDays=(d,n)=>{const x=new Date(d);x.setDate(x.getDate()+n);return x};
+          const today=()=>{const t=new Date();t.setHours(0,0,0,0);return t};
+          const fmt=d=>d.toLocaleDateString('de-DE',{day:'2-digit',month:'long',year:'numeric'});
+          const PN={free:'Free',pro:'Pro',ultra:'Ultra'},rank={free:0,pro:1,ultra:2},LIMIT=3;
+          const PROV=[
+          {k:'netflix',n:'Netflix',c:'Streaming',s:'nflx://',w:'https://www.netflix.com/youraccount',x:'https://www.netflix.com/cancelplan'},
+          {k:'spotify',n:'Spotify',c:'Streaming',s:'spotify://',w:'https://www.spotify.com/account/overview/',x:'https://www.spotify.com/account/subscription/'},
+          {k:'prime',n:'Amazon Prime',c:'Streaming',s:'aiv://',w:'https://www.amazon.de/gp/primecentral',x:'https://www.amazon.de/gp/primecentral'},
+          {k:'disney',n:'Disney+',c:'Streaming',s:'disneyplus://',w:'https://www.disneyplus.com/account',x:'https://www.disneyplus.com/account/subscription'},
+          {k:'youtube',n:'YouTube Premium',c:'Streaming',s:'youtube://',w:'https://www.youtube.com/paid_memberships',x:'https://www.youtube.com/paid_memberships'},
+          {k:'dazn',n:'DAZN',c:'Streaming',s:'dazn://',w:'https://www.dazn.com/de-DE/myaccount',x:'https://www.dazn.com/de-DE/myaccount'},
+          {k:'vodafone',n:'Vodafone',c:'Internet & Mobil',s:'',w:'https://www.vodafone.de/meinvodafone/',x:'https://www.vodafone.de/hilfe/kuendigung.html'},
+          {k:'telekom',n:'Telekom',c:'Internet & Mobil',s:'',w:'https://kundencenter.telekom.de',x:'https://kundencenter.telekom.de'},
+          {k:'o2',n:'O2',c:'Internet & Mobil',s:'',w:'https://www.o2online.de/mein-o2/',x:'https://www.o2online.de/mein-o2/'},
+          {k:'1und1',n:'1&1',c:'Internet & Mobil',s:'',w:'https://control-center.1und1.de',x:'https://control-center.1und1.de'},
+          {k:'fitx',n:'FitX',c:'Fitness',s:'',w:'https://www.fitx.de/mein-fitx',x:'https://www.fitx.de/mein-fitx'},
+          {k:'mcfit',n:'McFit',c:'Fitness',s:'',w:'https://www.mcfit.com/de/mein-mcfit/',x:'https://www.mcfit.com/de/mein-mcfit/'},
+          {k:'usc',n:'Urban Sports Club',c:'Fitness',s:'',w:'https://urbansportsclub.com',x:'https://urbansportsclub.com'}];
+          const CATS=['Streaming','Internet & Mobil','Fitness','Versicherung','Strom & Gas','Sonstiges'];
+          const KEY='fristo.v1';
+          let S=Object.assign({plan:'free',yearly:true,contracts:[],warranties:[],nid:1},JSON.parse(localStorage.getItem(KEY)||'{}'));
+          const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}};
+          let tab='home',cyc='m',selR=[5],perm='unknown',nativeOK=false;
+          const mon=c=>c.y?c.c/12:c.c;
+          const deadline=c=>addDays(D(c.end),-c.notice);
+          const dl=c=>Math.round((deadline(c)-today())/864e5);
+          const prov=c=>{if(c.pk&&c.pk!=='x')return PROV.find(p=>p.k===c.pk);if(c.url){const web=/^https?:/.test(c.url);return{s:web?'':c.url,w:web?c.url:'',x:''}}return null};
+          const pill=d=>d<0?'<span class="pill hot">Frist vorbei</span>':`<span class="pill ${d<=7?'hot':''}">${d===0?'heute':'in '+d+' Tagen'}</span>`;
+          const row=c=>`<div class="row" data-a="detail" data-v="${c.id}"><div class="ico">${c.n.slice(0,1).toUpperCase()}</div><div class="grow"><b>${c.n}</b><span>${eur(c.c)} / ${c.y?'Jahr':'Monat'} · ${c.cat}</span></div>${pill(dl(c))}</div>`;
+          const lockBox=(h,min,msg)=>`<div class="glass card lockbox" data-a="paywall" data-v="${min}"><div class="inner">${h}</div><div class="lk"><span>${msg||PN[min]+' freischalten'}</span></div></div>`;
+          function openWeb(u){const AL=cap('AppLauncher');if(AL)AL.openUrl({url:u}).catch(()=>{});else window.open(u,'_blank')}
+          async function openApp(p){const AL=cap('AppLauncher');if(p.s&&AL){try{const r=await AL.openUrl({url:p.s});if(r&&r.completed)return}catch(e){}}if(p.w)openWeb(p.w);else toast('Kein Link hinterlegt')}
+
+          function render(){
+           const C=S.contracts,tot=C.reduce((s,c)=>s+mon(c),0),next=[...C].sort((a,b)=>dl(a)-dl(b)).filter(c=>dl(c)>=0)[0];
+           const np=nativeOK&&perm!=='granted'?`<div class="glass card" style="margin-bottom:14px"><b>Erinnerungen aktivieren</b><p class="mut" style="margin:4px 0 0">Fristo meldet sich vor jeder Kündigungsfrist.</p><button class="btn pri full" data-a="perm">Benachrichtigungen erlauben</button></div>`:'';
+           const cats=CATS.map(k=>[k,C.filter(c=>c.cat===k).reduce((s,c)=>s+mon(c),0)]).filter(x=>x[1]>0);
+           const ana=`<h2>Kosten nach Kategorie</h2>`+(rank[S.plan]>=1?`<div class="glass card">${cats.map(([k,v])=>`<div style="display:flex;justify-content:space-between"><span>${k}</span><b>${eur(v)}</b></div><div class="bar"><i style="width:${Math.round(v/tot*100)}%"></i></div>`).join('')||'<span class="mut">Noch keine Daten.</span>'}</div>`:lockBox('<div style="display:flex;justify-content:space-between"><span>Streaming</span><b>00,00 €</b></div><div class="bar"><i style="width:60%"></i></div><div style="display:flex;justify-content:space-between"><span>Internet</span><b>00,00 €</b></div><div class="bar"><i style="width:35%"></i></div>','pro'));
+           let nx='';if(next){const p=prov(next);nx=`<h2>Als Nächstes</h2><div class="glass card"><div style="display:flex;justify-content:space-between;align-items:center"><b style="font-size:20px">${next.n}</b>${pill(dl(next))}</div><p class="mut" style="margin:6px 0 0">Kündigen möglich bis ${fmt(deadline(next))}</p><div class="btns">${p&&(p.s||p.w)?`<button class="btn pri" data-a="app" data-v="${next.id}">App öffnen</button>`:''}${p&&p.x?`<button class="btn" data-a="cancel" data-v="${next.id}">Kündigen</button>`:''}<button class="btn" data-a="detail" data-v="${next.id}">Details</button></div></div>`}
+           $('#p-home').innerHTML=`<div class="top"><div class="brand">${LOGO}Fristo</div><button class="btn sm" data-a="tab" data-v="plans">${PN[S.plan]}</button></div>${np}
+           <div class="glass card"><div class="mut">Du zahlst pro Monat</div><div class="big">${eur(tot)}</div><div class="mut">${C.length} ${C.length===1?'Vertrag':'Verträge'} · ${eur(tot*12)} im Jahr</div></div>
+           ${C.length?nx+ana:`<div class="glass card empty" style="margin-top:14px"><b style="color:var(--tx)">Noch keine Verträge</b><p style="margin:6px 0 0">Füge deinen ersten echten Vertrag hinzu. Fristo erinnert dich rechtzeitig vor der Kündigungsfrist.</p><button class="btn pri full" data-a="add">Vertrag hinzufügen</button></div>`}`;
+           $('#p-list').innerHTML=`<h1>Verträge</h1><p class="sub">${C.length}${S.plan==='free'?' von '+LIMIT:''} Verträge</p>${C.length?`<div class="glass list">${[...C].sort((a,b)=>dl(a)-dl(b)).map(row).join('')}</div>`:'<div class="glass card empty">Tippe auf +, um einen Vertrag hinzuzufügen.</div>'}`;
+           const W=S.warranties,wd=w=>Math.round((addDays(D(w.buy),Math.round(w.m*30.4375))-today())/864e5);
+           $('#p-war').innerHTML=`<h1>Garantien</h1><p class="sub">Kaufdatum eintragen. Fristo erinnert dich vor Ablauf der Garantie.</p>`+(rank[S.plan]>=1?(W.length?`<div class="glass list">${W.map(w=>`<div class="row" data-a="wdetail" data-v="${w.id}"><div class="ico">${w.n.slice(0,1).toUpperCase()}</div><div class="grow"><b>${w.n}</b><span>${w.m} Monate${w.p?' · '+eur(w.p):''}</span></div>${wd(w)<0?'<span class="pill">abgelaufen</span>':pill(wd(w))}</div>`).join('')}</div>`:'<div class="glass card empty">Noch keine Geräte. Tippe auf +.</div>'):lockBox('<b style="font-size:20px">Garantie-Tresor</b><p class="mut">Waschmaschine, Laptop, Handy: alle Garantien an einem Ort mit Erinnerung vor Ablauf.</p>','pro','Mit Pro freischalten'));
+           const P=k=>S.yearly?{pro:'2,99',ultra:'5,99'}[k]:{pro:'3,99',ultra:'7,99'}[k];
+           const cta=k=>S.plan===k?'<button class="btn full" disabled style="opacity:.5">Aktueller Plan</button>':`<button class="btn ${k==='pro'?'pri':''} full" data-a="plan" data-v="${k}">${k==='free'?'Zu Free wechseln':PN[k]+' wählen'}</button>`;
+           $('#p-plans').innerHTML=`<h1>Pläne</h1><p class="sub">Starte kostenlos. Upgrade, wenn es sich lohnt.</p>
+           <div class="seg"><button class="${!S.yearly?'on':''}" data-a="bill" data-v="m">Monatlich</button><button class="${S.yearly?'on':''}" data-a="bill" data-v="y">Jährlich −25 %</button></div>
+           <div class="glass plan"><h3>Free</h3><div class="pr">0 €</div><ul><li>${LIMIT} Verträge</li><li>1 Erinnerung pro Vertrag</li><li>Direkt zur App oder Kündigungsseite</li><li class="no">Garantie-Tresor</li><li class="no">Kündigungsschreiben</li></ul>${cta('free')}</div>
+           <div class="glass plan feat"><h3>Pro</h3><div class="pr">${P('pro')} €<small> / Monat</small></div><ul><li>Unbegrenzt Verträge</li><li>Mehrere Erinnerungen pro Vertrag</li><li>Garantie-Tresor mit Erinnerung</li><li>Kündigungsschreiben in 1 Tipp</li><li>Kostenanalyse nach Kategorie</li></ul>${cta('pro')}</div>
+           <div class="glass plan"><h3>Ultra</h3><div class="pr">${P('ultra')} €<small> / Monat</small></div><ul><li>Alles aus Pro</li><li>Kündigung per E-Mail vorbereiten</li><li>Backup und Wiederherstellung</li><li>Familien-Sharing (bald)</li></ul>${cta('ultra')}</div>
+           ${rank[S.plan]>=2?'<div class="glass card"><b>Daten</b><div class="btns"><button class="btn" data-a="bk">Backup kopieren</button><button class="btn" data-a="rs">Einspielen</button></div></div>':''}
+           <p class="mut" style="text-align:center;margin-top:12px">Jederzeit kündbar. Zahlung über Stripe, sobald verbunden.</p>`;
+           document.querySelectorAll('.page').forEach(p=>p.classList.toggle('on',p.id==='p-'+tab));
+           document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.v===tab));
+           $('#fab').classList.toggle('show',tab==='list'||tab==='home'||tab==='war');
+          }
+          function sheet(h){$('#sheet').innerHTML='<div class="grab"></div>'+h;$('#sheet').classList.add('on');$('#veil').classList.add('on')}
+          function close(){$('#sheet').classList.remove('on');$('#veil').classList.remove('on')}
+          let tt;function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('on');clearTimeout(tt);tt=setTimeout(()=>t.classList.remove('on'),2800)}
+          function paywall(min){const n=PN[min]||'Pro';sheet(`<h3>${n} freischalten</h3><p class="sub">Mehr Verträge, mehrere Erinnerungen, Garantie-Tresor und Kündigungsschreiben.</p><button class="btn pri full" data-a="plan" data-v="${min||'pro'}">${n} wählen</button><button class="btn full" data-a="plansgo">Pläne vergleichen</button>`)}
+          const remChips=()=>[30,14,7,5].map(d=>`<button class="chip ${selR.includes(d)?'on':''}" data-a="rem" data-v="${d}">${d} Tage vorher</button>`).join('');
+          function addSheet(){
+           if(tab==='war')return wAdd();
+           if(S.plan==='free'&&S.contracts.length>=LIMIT)return paywall('pro');
+           cyc='m';selR=[5];
+           sheet(`<h3>Vertrag hinzufügen</h3><p class="sub">Nur echte Verträge, die du wirklich hast.</p>
+           <label>Anbieter</label><select id="f-p" data-ch="prov"><option value="x">Anderer Anbieter</option>${PROV.map(p=>`<option value="${p.k}">${p.n}</option>`).join('')}</select>
+           <label>Name</label><input id="f-n" placeholder="z. B. Stadtwerke Strom">
+           <label>Kategorie</label><select id="f-c">${CATS.map(c=>`<option>${c}</option>`).join('')}</select>
+           <label>Betrag in Euro</label><input id="f-b" type="number" inputmode="decimal" placeholder="9,99">
+           <label>Zahlung</label><div class="seg" style="margin:0"><button class="on" data-a="cyc" data-v="m">Monatlich</button><button data-a="cyc" data-v="y">Jährlich</button></div>
+           <label>Vertragsende</label><input id="f-d" type="date">
+           <label>Kündigungsfrist</label><select id="f-k"><option value="0">Keine</option><option value="14">2 Wochen</option><option value="30" selected>1 Monat</option><option value="90">3 Monate</option></select>
+           <label>Erinnerung vor der Frist</label><div class="chips" id="f-r">${remChips()}</div>
+           <div id="f-u"><label>App- oder Webadresse (optional)</label><input id="f-l" placeholder="https://..."></div>
+           <button class="btn pri full" data-a="save">Vertrag speichern</button>`)}
+          function wAdd(){if(rank[S.plan]<1)return paywall('pro');
+           sheet(`<h3>Gerät hinzufügen</h3><p class="sub">Erinnerung 30 Tage vor Garantie-Ende.</p><label>Gerät</label><input id="w-n" placeholder="z. B. Waschmaschine">
+           <label>Kaufdatum</label><input id="w-d" type="date"><label>Garantie in Monaten</label><input id="w-m" type="number" value="24"><label>Preis in Euro (optional)</label><input id="w-p" type="number" inputmode="decimal">
+           <button class="btn pri full" data-a="wsave">Speichern</button>`)}
+          function detail(id){const c=S.contracts.find(x=>x.id==id);if(!c)return;const d=dl(c),p=prov(c);
+           sheet(`<h3>${c.n}</h3>${pill(d)}<div class="kv" style="margin-top:12px"><span>Kosten</span><b>${eur(c.c)} / ${c.y?'Jahr':'Monat'}</b></div><div class="kv"><span>Vertragsende</span><b>${fmt(D(c.end))}</b></div><div class="kv"><span>Kündigen bis</span><b>${fmt(deadline(c))}</b></div><div class="kv"><span>Erinnerung</span><b>${c.rem.map(r=>r+' T').join(', ')}</b></div><div id="ex"></div>
+           ${p&&(p.s||p.w)?`<button class="btn pri full" data-a="app" data-v="${c.id}">App öffnen</button>`:''}${p&&p.x?`<button class="btn full" data-a="cancel" data-v="${c.id}">Kündigungsseite öffnen</button>`:''}
+           <button class="btn full" data-a="letter" data-v="${c.id}">Kündigungsschreiben erstellen</button><button class="btn full" data-a="del" data-v="${c.id}">Vertrag löschen</button>`)}
+          const A={tab(v){tab=v;render();scrollTo({top:0,behavior:'smooth'})},bill(v){S.yearly=v==='y';save();render()},add:addSheet,close,paywall,plansgo(){close();A.tab('plans')},
+           cyc(v,el){cyc=v;el.parentNode.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b===el))},
+           rem(v,el){v=+v;if(selR.includes(v)){selR=selR.filter(x=>x!==v)}else{if(S.plan==='free'&&selR.length>=1){paywall('pro');return}selR.push(v)}$('#f-r').innerHTML=remChips()},
+           plan(v){if(v==='free'){S.plan='free';save();render();toast('Du bist im Free-Plan');return}checkout(v)},
+           perm:askPerm,
+           save(){const n=$('#f-n').value.trim(),b=parseFloat($('#f-b').value.replace(',','.')),e=$('#f-d').value,pk=$('#f-p').value;
+            if(!n||!(b>0)){toast('Bitte Name und Betrag eingeben');return}if(!e||D(e)<today()){toast('Bitte ein Vertragsende in der Zukunft wählen');return}
+            S.contracts.push({id:S.nid++,n,pk,cat:$('#f-c').value,c:b,y:cyc==='y'?1:0,end:e,notice:+$('#f-k').value,rem:[...selR],url:$('#f-l').value.trim()});
+            save();close();render();sync();toast(n+' gespeichert')},
+           wsave(){const n=$('#w-n').value.trim(),b=$('#w-d').value,m=+$('#w-m').value;if(!n||!b||!(m>0)){toast('Bitte alle Felder ausfüllen');return}
+            S.warranties.push({id:S.nid++,n,buy:b,m,p:parseFloat($('#w-p').value)||0});save();close();render();sync();toast(n+' gespeichert')},
+           detail,wdetail(v){const w=S.warranties.find(x=>x.id==v);if(!w)return;sheet(`<h3>${w.n}</h3><div class="kv" style="margin-top:12px"><span>Gekauft</span><b>${fmt(D(w.buy))}</b></div><div class="kv"><span>Garantie</span><b>${w.m} Monate</b></div><div class="kv"><span>Läuft ab</span><b>${fmt(addDays(D(w.buy),Math.round(w.m*30.4375)))}</b></div><button class="btn full" data-a="wdel" data-v="${w.id}">Gerät löschen</button>`)},
+           wdel(v){S.warranties=S.warranties.filter(x=>x.id!=v);save();close();render();sync()},
+           app(v){const c=S.contracts.find(x=>x.id==v),p=c&&prov(c);if(p)openApp(p)},
+           cancel(v){const c=S.contracts.find(x=>x.id==v),p=c&&prov(c);if(p&&p.x)openWeb(p.x)},
+           del(v){S.contracts=S.contracts.filter(x=>x.id!=v);save();close();render();sync();toast('Vertrag gelöscht')},
+           letter(v){const c=S.contracts.find(x=>x.id==v);if(rank[S.plan]<1)return paywall('pro');
+            const t=`Sehr geehrte Damen und Herren,\n\nhiermit kündige ich meinen Vertrag (${c.n}, Kundennummer: [bitte ergänzen]) ordentlich und fristgerecht zum ${fmt(D(c.end))}, hilfsweise zum nächstmöglichen Zeitpunkt.\n\nBitte bestätigen Sie mir die Kündigung schriftlich unter Angabe des Beendigungsdatums.\n\nMit freundlichen Grüßen\n[Dein Name]`;
+            window._ltr=t;$('#ex').innerHTML=`<div class="letter">${t}</div><div class="btns"><button class="btn" data-a="copy">Kopieren</button><button class="btn" data-a="mail">Per E-Mail</button></div>`},
+           copy(){try{navigator.clipboard.writeText(window._ltr)}catch(e){}toast('Kopiert')},
+           mail(){if(rank[S.plan]<2)return paywall('ultra');openWeb('mailto:?subject='+encodeURIComponent('Kündigung')+'&body='+encodeURIComponent(window._ltr))},
+           bk(){try{navigator.clipboard.writeText(JSON.stringify(S))}catch(e){}toast('Backup kopiert')},
+           rs(){sheet(`<h3>Backup einspielen</h3><p class="sub">Füge den kopierten Backup-Text ein.</p><textarea id="bk-t" rows="6"></textarea><button class="btn pri full" data-a="rsgo">Einspielen</button>`)},
+           rsgo(){try{const j=JSON.parse($('#bk-t').value);if(!Array.isArray(j.contracts))throw 0;S=Object.assign(S,j);save();close();render();sync();toast('Backup eingespielt')}catch(e){toast('Das ist kein gültiges Backup')}}};
+          document.addEventListener('click',e=>{const a=e.target.closest('[data-a]');if(!a||a.disabled)return;(A[a.dataset.a]||(()=>{}))(a.dataset.v,a)});
+          document.addEventListener('change',e=>{if(e.target.dataset.ch==='prov'){const p=PROV.find(x=>x.k===e.target.value);if(p){$('#f-n').value=p.n;$('#f-c').value=p.c;$('#f-u').style.display='none'}else{$('#f-u').style.display='block'}}});
+          /* ===== Benachrichtigungen ===== */
+          async function askPerm(){const LN=cap('LocalNotifications');if(!LN)return;try{const r=await LN.requestPermissions();perm=r.display}catch(e){}render();sync()}
+          async function sync(){const LN=cap('LocalNotifications');if(!LN||perm!=='granted')return;
+           try{const pend=await LN.getPending();if(pend.notifications.length)await LN.cancel({notifications:pend.notifications});
+           const now=Date.now(),list=[];let id=1;
+           const at=(d)=>{const x=new Date(d);x.setHours(9,0,0,0);return x};
+           S.contracts.forEach(c=>{[...c.rem,0].forEach(r=>{const w=at(addDays(deadline(c),-r));if(w.getTime()>now)list.push({id:id++,title:r===0?'Heute endet die Kündigungsfrist':'Kündigungsfrist in '+r+' Tagen',body:c.n+': Jetzt prüfen, ob du kündigen willst.',schedule:{at:w}})})});
+           S.warranties.forEach(w=>{const end=addDays(D(w.buy),Math.round(w.m*30.4375)),when=at(addDays(end,-30));if(when.getTime()>now)list.push({id:id++,title:'Garantie läuft bald ab',body:w.n+': Noch 30 Tage Garantie. Jetzt auf Mängel prüfen.',schedule:{at:when}})});
+           if(list.length)await LN.schedule({notifications:list})}catch(e){}}
+          (async()=>{const LN=cap('LocalNotifications');nativeOK=!!LN;if(LN){try{const r=await LN.checkPermissions();perm=r.display}catch(e){}}render();sync()})();
+          render();
+          </script></body></html>
+          EOF
+          cat > icons.js <<'EOF'
+          const sharp = require('sharp');
+          const fs = require('fs');
+          fs.mkdirSync('assets', { recursive: true });
+          const defs = '<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#34343a"/><stop offset="1" stop-color="#0a0a0c"/></linearGradient><linearGradient id="r" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#b9b9c2"/></linearGradient></defs>';
+          const mark = '<path d="M50 22A28 28 0 1 1 22 50" fill="none" stroke="url(#r)" stroke-width="8" stroke-linecap="round"/><circle cx="50" cy="50" r="7" fill="#fff"/>';
+          const wrap = (inner) => '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">' + defs + inner + '</svg>';
+          const small = '<g transform="translate(50 50) scale(0.8) translate(-50 -50)">' + mark + '</g>';
+          const out = async (name, svg) => sharp(Buffer.from(svg)).resize(1024, 1024).png().toFile('assets/' + name);
+          (async () => {
+            await out('icon-only.png', wrap('<rect width="100" height="100" fill="url(#g)"/>' + mark));
+            await out('icon-background.png', wrap('<rect width="100" height="100" fill="url(#g)"/>'));
+            await out('icon-foreground.png', wrap(small));
+            console.log('Icons erstellt');
+          })();
+          EOF
+
+      - name: Capacitor installieren
+        working-directory: app
+        run: |
+          npm init -y
+          npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6 @capacitor/local-notifications@6 @capacitor/app-launcher@6 @capacitor/assets sharp
+          npx cap init Fristo de.fristo.app --web-dir www
+          npx cap add android
+
+      - name: Logo und App-Icons erzeugen
+        working-directory: app
+        run: |
+          node icons.js
+          npx capacitor-assets generate --android
+
+      - name: Benachrichtigungs-Berechtigung eintragen
+        working-directory: app
+        run: |
+          sed -i 's#</manifest>#    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\n</manifest>#' android/app/src/main/AndroidManifest.xml
+          npx cap sync android
 
       - name: APK bauen
+        working-directory: app/android
         run: |
-          set -o pipefail
-          gradle assembleDebug --stacktrace --console=plain 2>&1 | tee build.log
+          chmod +x gradlew
+          ./gradlew assembleDebug
 
-      - name: Fehler-Zusammenfassung
-        if: failure()
-        run: |
-          {
-            echo "## Build-Fehler"
-            echo '```'
-            grep -E "^e: |AAPT|What went wrong|Execution failed|error:" -A3 build.log | head -60
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - uses: actions/upload-artifact@v4
+      - name: APK hochladen
+        uses: actions/upload-artifact@v4
         with:
-          name: Discipline-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: Fristo-APK
+          path: app/android/app/build/outputs/apk/debug/app-debug.apk

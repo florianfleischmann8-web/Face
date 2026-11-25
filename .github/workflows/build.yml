@@ -1,489 +1,632 @@
-# Lumo: Social-App. Speichere diese Datei als .github/workflows/build.yml in einem GitHub-Repository.
-# Vorher: Supabase einrichten (siehe supabase.sql) und in GitHub unter Settings -> Secrets and variables -> Actions
-# die Secrets SUPABASE_URL und SUPABASE_ANON_KEY anlegen. Dann: Actions -> "Lumo APK bauen" -> Run workflow.
-name: Lumo APK bauen
+name: Build APK
 
 on:
-  workflow_dispatch:
   push:
-    branches: [main, master]
+  workflow_dispatch:
 
 jobs:
-  apk:
+  build:
     runs-on: ubuntu-latest
-    env:
-      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
     steps:
-      - name: Secrets prüfen
-        run: |
-          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_ANON_KEY" ]; then echo "Bitte SUPABASE_URL und SUPABASE_ANON_KEY als Repository-Secrets anlegen."; exit 1; fi
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
+      - uses: actions/checkout@v4
 
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          java-version: '17'
 
-      - name: App-Code schreiben
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Projekt erzeugen
         run: |
-          mkdir -p app/www && cd app
-          cat > www/index.html <<'EOF'
-          <!DOCTYPE html>
-          <html lang="de"><head><meta charset="utf-8">
-          <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
-          <meta name="theme-color" content="#07070b"><title>Lumo</title>
+          mkdir -p app/src/main/java/com/example/mirror app/src/main/res/xml app/src/main/res/values app/src/main/assets
+
+          cat > settings.gradle <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "ScreenMirror"
+          include ':app'
+          EOF
+
+          cat > build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application' version '8.5.2' apply false
+          }
+          EOF
+
+          cat > app/build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application'
+          }
+          android {
+              namespace 'com.example.mirror'
+              compileSdk 34
+              defaultConfig {
+                  applicationId 'com.example.mirror'
+                  minSdk 26
+                  targetSdk 34
+                  versionCode 1
+                  versionName '1.0'
+              }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+          }
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <application
+                  android:label="Screen Mirror"
+                  android:theme="@android:style/Theme.Material.Light.NoActionBar">
+                  <activity android:name=".MainActivity" android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+                  <service
+                      android:name=".ScreenService"
+                      android:exported="false"
+                      android:foregroundServiceType="mediaProjection" />
+                  <service
+                      android:name=".ControlService"
+                      android:exported="true"
+                      android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+                      <intent-filter>
+                          <action android:name="android.accessibilityservice.AccessibilityService" />
+                      </intent-filter>
+                      <meta-data
+                          android:name="android.accessibilityservice"
+                          android:resource="@xml/accessibility_config" />
+                  </service>
+              </application>
+          </manifest>
+          EOF
+
+          cat > app/src/main/java/com/example/mirror/MainActivity.java <<'EOF'
+          package com.example.mirror;
+
+          import android.app.Activity;
+          import android.content.Intent;
+          import android.media.projection.MediaProjectionManager;
+          import android.os.Build;
+          import android.os.Bundle;
+          import android.provider.Settings;
+          import android.view.Gravity;
+          import android.widget.Button;
+          import android.widget.LinearLayout;
+          import android.widget.TextView;
+          import java.net.Inet4Address;
+          import java.net.InetAddress;
+          import java.net.NetworkInterface;
+          import java.util.Collections;
+
+          public class MainActivity extends Activity {
+              private static final int REQ = 1;
+              private TextView info;
+
+              @Override
+              protected void onCreate(Bundle b) {
+                  super.onCreate(b);
+                  LinearLayout l = new LinearLayout(this);
+                  l.setOrientation(LinearLayout.VERTICAL);
+                  l.setGravity(Gravity.CENTER);
+                  l.setPadding(48, 48, 48, 48);
+
+                  info = new TextView(this);
+                  info.setTextSize(20);
+                  info.setGravity(Gravity.CENTER);
+
+                  Button start = new Button(this);
+                  start.setText("Spiegeln starten");
+                  start.setOnClickListener(v -> {
+                      MediaProjectionManager m =
+                          (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
+                      startActivityForResult(m.createScreenCaptureIntent(), REQ);
+                  });
+
+                  Button stop = new Button(this);
+                  stop.setText("Stoppen");
+                  stop.setOnClickListener(v -> {
+                      Intent i = new Intent(this, ScreenService.class);
+                      i.setAction("STOP");
+                      startService(i);
+                  });
+
+                  Button acc = new Button(this);
+                  acc.setText("Steuerung aktivieren");
+                  acc.setOnClickListener(v ->
+                      startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
+
+                  l.addView(info);
+                  l.addView(acc);
+                  l.addView(start);
+                  l.addView(stop);
+                  setContentView(l);
+
+                  if (Build.VERSION.SDK_INT >= 33) {
+                      requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 2);
+                  }
+              }
+
+              @Override
+              protected void onResume() {
+                  super.onResume();
+                  String ip = findIp();
+                  if (ip == null) {
+                      info.setText("Kein WLAN gefunden. Verbinde das Handy mit WLAN oder starte den Hotspot.");
+                  } else {
+                      info.setText("\u00d6ffne auf dem iPad in Safari:\n\nhttp://" + ip + ":8080"
+                          + "\n\nSteuerung: " + (ControlService.instance != null ? "an" : "aus"));
+                  }
+              }
+
+              @Override
+              protected void onActivityResult(int req, int res, Intent data) {
+                  super.onActivityResult(req, res, data);
+                  if (req == REQ && res == RESULT_OK && data != null) {
+                      Intent i = new Intent(this, ScreenService.class);
+                      i.putExtra("code", res);
+                      i.putExtra("data", data);
+                      startForegroundService(i);
+                  }
+              }
+
+              private static String findIp() {
+                  try {
+                      for (NetworkInterface ni : Collections.list(NetworkInterface.getNetworkInterfaces())) {
+                          for (InetAddress a : Collections.list(ni.getInetAddresses())) {
+                              if (!a.isLoopbackAddress() && a instanceof Inet4Address && a.isSiteLocalAddress()) {
+                                  return a.getHostAddress();
+                              }
+                          }
+                      }
+                  } catch (Exception e) {
+                  }
+                  return null;
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/example/mirror/ScreenService.java <<'EOF'
+          package com.example.mirror;
+
+          import android.app.Notification;
+          import android.app.NotificationChannel;
+          import android.app.NotificationManager;
+          import android.app.Service;
+          import android.content.Intent;
+          import android.content.pm.ServiceInfo;
+          import android.graphics.Bitmap;
+          import android.graphics.PixelFormat;
+          import android.hardware.display.DisplayManager;
+          import android.hardware.display.VirtualDisplay;
+          import android.media.Image;
+          import android.media.ImageReader;
+          import android.media.projection.MediaProjection;
+          import android.media.projection.MediaProjectionManager;
+          import android.os.Build;
+          import android.os.Handler;
+          import android.os.HandlerThread;
+          import android.os.IBinder;
+          import android.util.DisplayMetrics;
+          import android.view.WindowManager;
+          import java.io.BufferedReader;
+          import java.io.ByteArrayOutputStream;
+          import java.io.InputStreamReader;
+          import java.io.OutputStream;
+          import java.net.ServerSocket;
+          import java.net.Socket;
+          import java.nio.ByteBuffer;
+
+          public class ScreenService extends Service {
+              private static final String HTML =
+                  "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
+                  + "<title>Mirror</title></head><body style='margin:0;background:#000'>"
+                  + "<img src='/stream' style='width:100vw;height:100vh;object-fit:contain'></body></html>";
+
+              private MediaProjection projection;
+              private VirtualDisplay vd;
+              private ImageReader reader;
+              private HandlerThread ht;
+              private ServerSocket server;
+              private volatile boolean running = false;
+              static volatile int screenW = 1080;
+              static volatile int screenH = 2340;
+              private byte[] pageBytes;
+              private volatile byte[] frame;
+              private volatile long frameNo = 0;
+              private final Object lock = new Object();
+
+              @Override
+              public IBinder onBind(Intent i) {
+                  return null;
+              }
+
+              @Override
+              public int onStartCommand(Intent intent, int flags, int startId) {
+                  if (intent == null) return START_NOT_STICKY;
+                  if ("STOP".equals(intent.getAction())) {
+                      stopAll();
+                      stopSelf();
+                      return START_NOT_STICKY;
+                  }
+                  if (running) return START_NOT_STICKY;
+
+                  NotificationManager nm = getSystemService(NotificationManager.class);
+                  nm.createNotificationChannel(
+                      new NotificationChannel("mirror", "Spiegeln", NotificationManager.IMPORTANCE_LOW));
+                  Notification n = new Notification.Builder(this, "mirror")
+                      .setContentTitle("Bildschirm wird gespiegelt")
+                      .setSmallIcon(android.R.drawable.ic_menu_view)
+                      .build();
+                  startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
+
+                  try {
+                      int code = intent.getIntExtra("code", 0);
+                      Intent data = intent.getParcelableExtra("data");
+                      MediaProjectionManager mpm =
+                          (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
+                      projection = mpm.getMediaProjection(code, data);
+
+                      ht = new HandlerThread("capture");
+                      ht.start();
+                      Handler h = new Handler(ht.getLooper());
+
+                      projection.registerCallback(new MediaProjection.Callback() {
+                          @Override
+                          public void onStop() {
+                              stopAll();
+                          }
+                      }, h);
+
+                      DisplayMetrics dm = new DisplayMetrics();
+                      ((WindowManager) getSystemService(WINDOW_SERVICE)).getDefaultDisplay().getRealMetrics(dm);
+                      screenW = dm.widthPixels;
+                      screenH = dm.heightPixels;
+                      loadPage();
+                      int w = (dm.widthPixels / 2) & ~1;
+                      int hh = (dm.heightPixels / 2) & ~1;
+
+                      reader = ImageReader.newInstance(w, hh, PixelFormat.RGBA_8888, 2);
+                      reader.setOnImageAvailableListener(r -> onFrame(r), h);
+                      vd = projection.createVirtualDisplay("mirror", w, hh, dm.densityDpi / 2,
+                          DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, reader.getSurface(), null, h);
+
+                      running = true;
+                      new Thread(this::serve).start();
+                  } catch (Exception e) {
+                      stopSelf();
+                  }
+                  return START_NOT_STICKY;
+              }
+
+              private void onFrame(ImageReader r) {
+                  Image img = null;
+                  try {
+                      img = r.acquireLatestImage();
+                      if (img == null) return;
+                      Image.Plane p = img.getPlanes()[0];
+                      ByteBuffer buf = p.getBuffer();
+                      int ps = p.getPixelStride();
+                      int rs = p.getRowStride();
+                      int w = img.getWidth();
+                      int hgt = img.getHeight();
+                      Bitmap bmp = Bitmap.createBitmap(rs / ps, hgt, Bitmap.Config.ARGB_8888);
+                      bmp.copyPixelsFromBuffer(buf);
+                      Bitmap crop = Bitmap.createBitmap(bmp, 0, 0, w, hgt);
+                      ByteArrayOutputStream bos = new ByteArrayOutputStream();
+                      crop.compress(Bitmap.CompressFormat.JPEG, 65, bos);
+                      if (crop != bmp) crop.recycle();
+                      bmp.recycle();
+                      synchronized (lock) {
+                          frame = bos.toByteArray();
+                          frameNo++;
+                          lock.notifyAll();
+                      }
+                  } catch (Exception e) {
+                  } finally {
+                      if (img != null) img.close();
+                  }
+              }
+
+              private void serve() {
+                  try {
+                      server = new ServerSocket(8080);
+                      while (running) {
+                          Socket s = server.accept();
+                          new Thread(() -> handle(s)).start();
+                      }
+                  } catch (Exception e) {
+                  }
+              }
+
+              private void handle(Socket s) {
+                  try {
+                      s.setTcpNoDelay(true);
+                      BufferedReader in = new BufferedReader(new InputStreamReader(s.getInputStream()));
+                      String line = in.readLine();
+                      if (line == null) return;
+                      String l;
+                      while ((l = in.readLine()) != null && !l.isEmpty()) {
+                      }
+                      OutputStream out = s.getOutputStream();
+                      String path = line.split(" ")[1];
+                      if (path.startsWith("/tap") || path.startsWith("/swipe") || path.startsWith("/key")) {
+                          control(path);
+                          out.write("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok".getBytes());
+                          out.flush();
+                      } else if (path.startsWith("/stream")) {
+                          out.write(("HTTP/1.1 200 OK\r\n"
+                              + "Content-Type: multipart/x-mixed-replace; boundary=frame\r\n"
+                              + "Cache-Control: no-cache\r\n"
+                              + "Connection: close\r\n\r\n").getBytes());
+                          long seen = 0;
+                          while (running) {
+                              byte[] f;
+                              synchronized (lock) {
+                                  while (running && frameNo == seen) lock.wait(1000);
+                                  f = frame;
+                                  seen = frameNo;
+                              }
+                              if (f == null) continue;
+                              out.write(("--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
+                                  + f.length + "\r\n\r\n").getBytes());
+                              out.write(f);
+                              out.write("\r\n".getBytes());
+                              out.flush();
+                          }
+                      } else {
+                          byte[] page = pageBytes != null ? pageBytes : HTML.getBytes("UTF-8");
+                          out.write(("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n"
+                              + "Content-Length: " + page.length + "\r\nConnection: close\r\n\r\n").getBytes());
+                          out.write(page);
+                          out.flush();
+                      }
+                  } catch (Exception e) {
+                  } finally {
+                      try {
+                          s.close();
+                      } catch (Exception e) {
+                      }
+                  }
+              }
+
+              private void loadPage() {
+                  try {
+                      java.io.InputStream is = getAssets().open("index.html");
+                      ByteArrayOutputStream bo = new ByteArrayOutputStream();
+                      byte[] b = new byte[4096];
+                      int n;
+                      while ((n = is.read(b)) > 0) bo.write(b, 0, n);
+                      is.close();
+                      pageBytes = bo.toByteArray();
+                  } catch (Exception e) {
+                  }
+              }
+
+              private static String param(String path, String key) {
+                  int qm = path.indexOf('?');
+                  if (qm < 0) return null;
+                  for (String kv : path.substring(qm + 1).split("&")) {
+                      int e = kv.indexOf('=');
+                      if (e > 0 && kv.substring(0, e).equals(key)) return kv.substring(e + 1);
+                  }
+                  return null;
+              }
+
+              private static float f(String path, String key) {
+                  try {
+                      return Float.parseFloat(param(path, key));
+                  } catch (Exception e) {
+                      return 0f;
+                  }
+              }
+
+              private static float clamp(float v, int max) {
+                  return Math.max(1f, Math.min(max - 1f, v));
+              }
+
+              private void control(String path) {
+                  ControlService c = ControlService.instance;
+                  if (c == null) return;
+                  try {
+                      if (path.startsWith("/tap")) {
+                          float x = clamp(f(path, "x") * screenW, screenW);
+                          float y = clamp(f(path, "y") * screenH, screenH);
+                          c.swipe(x, y, x, y, (long) f(path, "ms"));
+                      } else if (path.startsWith("/swipe")) {
+                          c.swipe(clamp(f(path, "x1") * screenW, screenW), clamp(f(path, "y1") * screenH, screenH),
+                              clamp(f(path, "x2") * screenW, screenW), clamp(f(path, "y2") * screenH, screenH),
+                              (long) f(path, "ms"));
+                      } else if (path.startsWith("/key")) {
+                          c.key(param(path, "k"));
+                      }
+                  } catch (Exception e) {
+                  }
+              }
+
+              private synchronized void stopAll() {
+                  if (!running) return;
+                  running = false;
+                  try {
+                      server.close();
+                  } catch (Exception e) {
+                  }
+                  synchronized (lock) {
+                      lock.notifyAll();
+                  }
+                  try {
+                      if (vd != null) vd.release();
+                  } catch (Exception e) {
+                  }
+                  try {
+                      if (reader != null) reader.close();
+                  } catch (Exception e) {
+                  }
+                  try {
+                      if (projection != null) projection.stop();
+                  } catch (Exception e) {
+                  }
+                  if (ht != null) ht.quitSafely();
+                  stopForeground(true);
+              }
+
+              @Override
+              public void onDestroy() {
+                  stopAll();
+                  super.onDestroy();
+              }
+          }
+          EOF
+
+      - name: Steuerung erzeugen
+        run: |
+          cat > app/src/main/res/values/strings.xml <<'EOF'
+          <resources>
+              <string name="acc_desc">Erlaubt Fernsteuerung vom iPad aus</string>
+          </resources>
+          EOF
+
+          cat > app/src/main/res/xml/accessibility_config.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+              android:accessibilityEventTypes="typeWindowStateChanged"
+              android:accessibilityFeedbackType="feedbackGeneric"
+              android:canPerformGestures="true"
+              android:description="@string/acc_desc"
+              android:notificationTimeout="100" />
+          EOF
+
+          cat > app/src/main/java/com/example/mirror/ControlService.java <<'EOF'
+          package com.example.mirror;
+
+          import android.accessibilityservice.AccessibilityService;
+          import android.accessibilityservice.GestureDescription;
+          import android.content.Intent;
+          import android.graphics.Path;
+          import android.view.accessibility.AccessibilityEvent;
+
+          public class ControlService extends AccessibilityService {
+              static volatile ControlService instance;
+
+              @Override
+              protected void onServiceConnected() {
+                  instance = this;
+              }
+
+              @Override
+              public void onAccessibilityEvent(AccessibilityEvent e) {
+              }
+
+              @Override
+              public void onInterrupt() {
+              }
+
+              @Override
+              public boolean onUnbind(Intent i) {
+                  instance = null;
+                  return super.onUnbind(i);
+              }
+
+              void swipe(float x1, float y1, float x2, float y2, long ms) {
+                  Path p = new Path();
+                  p.moveTo(x1, y1);
+                  if (x1 != x2 || y1 != y2) p.lineTo(x2, y2);
+                  GestureDescription.StrokeDescription s =
+                      new GestureDescription.StrokeDescription(p, 0, Math.max(ms, 1L));
+                  dispatchGesture(new GestureDescription.Builder().addStroke(s).build(), null, null);
+              }
+
+              void key(String k) {
+                  if (k == null) return;
+                  if (k.equals("back")) performGlobalAction(GLOBAL_ACTION_BACK);
+                  else if (k.equals("home")) performGlobalAction(GLOBAL_ACTION_HOME);
+                  else if (k.equals("recents")) performGlobalAction(GLOBAL_ACTION_RECENTS);
+              }
+          }
+          EOF
+
+          cat > app/src/main/assets/index.html <<'EOF'
+          <!doctype html>
+          <html>
+          <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+          <title>Mirror</title>
           <style>
-          :root{--bg:#07070b;--tx:#f5f5fa;--tx2:#9a9aaa;--gl:rgba(255,255,255,.08);--gl2:rgba(24,24,34,.82);--bd:rgba(255,255,255,.14);--ln:rgba(255,255,255,.08);--g:linear-gradient(135deg,#8b5cff,#ff4fa3 55%,#ffb86b);--pk:#ff4fa3;--top:max(env(safe-area-inset-top,0px),26px)}
-          *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-          html,body{margin:0;height:100%;background:var(--bg);color:var(--tx);font:16px/1.4 -apple-system,BlinkMacSystemFont,"SF Pro Text","Inter","Segoe UI",Roboto,sans-serif;overflow:hidden}
-          #app,#stage{height:100%;position:relative}
-          .ic{width:24px;height:24px;display:block}
-          .orb{position:fixed;border-radius:50%;filter:blur(70px);opacity:.55;pointer-events:none;animation:float 14s ease-in-out infinite alternate}
-          .o1{width:320px;height:320px;background:#8b5cff;top:-80px;left:-100px}.o2{width:300px;height:300px;background:#ff4fa3;bottom:-60px;right:-110px;animation-delay:-5s}.o3{width:220px;height:220px;background:#ffb86b;top:45%;left:55%;opacity:.3;animation-delay:-9s}
-          @keyframes float{to{transform:translate(40px,-50px) scale(1.15)}}
-          .auth{height:100%;overflow-y:auto;padding:calc(var(--top) + 24px) 24px 30px;display:flex;flex-direction:column;position:relative;z-index:1}
-          .auth.c{justify-content:center;text-align:center;align-items:center}
-          .logo{width:96px;height:96px;filter:drop-shadow(0 12px 40px rgba(255,79,163,.45))}
-          .wm{font-size:44px;font-weight:800;letter-spacing:-2px;margin:14px 0 4px}
-          .tag{color:var(--tx2);margin:0 0 34px}
-          h1{font-size:30px;letter-spacing:-1px;margin:0 0 4px}.sub{color:var(--tx2);margin:0 0 20px}
-          .glass{background:var(--gl);backdrop-filter:blur(26px) saturate(170%);-webkit-backdrop-filter:blur(26px) saturate(170%);border:1px solid var(--bd);box-shadow:inset 0 1px 0 rgba(255,255,255,.12)}
-          .btn{appearance:none;border:1px solid var(--bd);background:var(--gl);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);color:var(--tx);font:inherit;font-weight:650;padding:14px 20px;border-radius:999px;cursor:pointer;transition:transform .25s cubic-bezier(.3,1.4,.5,1)}
-          .btn:active{transform:scale(.95)}.btn.pri{background:var(--g);border:0;box-shadow:0 10px 30px rgba(255,79,163,.35)}
-          .btn.full{width:100%;display:block;margin-top:12px}.btn.sm{padding:8px 14px;font-size:14px}.btn[disabled]{opacity:.5}
-          label{display:block;font-size:13px;font-weight:620;color:var(--tx2);margin:14px 0 6px}
-          input,textarea,select{width:100%;font:inherit;color:var(--tx);background:var(--gl);border:1px solid var(--ln);border-radius:16px;padding:14px 16px;outline:none;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
-          input:focus,textarea:focus{border-color:var(--pk)}
-          .code{text-align:center;font-size:30px;letter-spacing:12px;font-weight:700}
-          .err{color:#ff7a8a;font-size:14px;min-height:20px;margin-top:10px}
-          .lnk{background:none;border:0;color:var(--tx2);font:inherit;padding:14px;cursor:pointer}
-          .av{width:44px;height:44px;border-radius:50%;background:var(--g);object-fit:cover;flex:none;display:grid;place-items:center;font-weight:700;overflow:hidden}
-          .av img{width:100%;height:100%;object-fit:cover}
-          .avp{width:92px;height:92px;margin:0 auto 6px;font-size:30px}
-          nav{position:fixed;left:50%;bottom:0;transform:translateX(-50%);z-index:30;width:min(440px,calc(100% - 24px));margin-bottom:calc(env(safe-area-inset-bottom,0px) + 10px);display:flex;padding:6px;border-radius:999px;background:var(--gl2)}
-          nav button{flex:1;border:0;background:transparent;color:var(--tx2);padding:10px 0;border-radius:999px;cursor:pointer;display:grid;place-items:center;transition:all .3s}
-          nav button.on{color:#fff;background:var(--gl)}
-          nav button.add{background:var(--g);color:#fff;flex:none;width:56px;margin:0 4px}
-          .page{height:100%;overflow-y:auto;padding:calc(var(--top) + 8px) 16px 110px}
-          .feed{height:100%;overflow-y:scroll;scroll-snap-type:y mandatory;overscroll-behavior:contain;scrollbar-width:none}
-          .feed::-webkit-scrollbar{display:none}
-          .reel{height:100%;scroll-snap-align:start;scroll-snap-stop:always;position:relative;background:#000;overflow:hidden}
-          .reel video{width:100%;height:100%;object-fit:cover;display:block}
-          .shade{position:absolute;inset:0;background:linear-gradient(transparent 55%,rgba(0,0,0,.7));pointer-events:none}
-          .info{position:absolute;left:16px;right:92px;bottom:calc(env(safe-area-inset-bottom,0px) + 94px);text-shadow:0 1px 8px rgba(0,0,0,.6)}
-          .info b{font-size:17px}.info p{margin:6px 0 0;font-size:15px}
-          .acts{position:absolute;right:10px;bottom:calc(env(safe-area-inset-bottom,0px) + 96px);display:flex;flex-direction:column;gap:16px;align-items:center}
-          .act{border:0;background:var(--gl);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid var(--bd);color:#fff;width:50px;height:50px;border-radius:50%;display:grid;place-items:center;cursor:pointer;position:relative;transition:transform .2s}
-          .act:active{transform:scale(.9)}
-          .cnt{font-size:12px;font-weight:650;text-align:center;margin-top:3px;text-shadow:0 1px 4px #000}
-          .act.liked{color:var(--pk);background:rgba(255,79,163,.18);border-color:rgba(255,79,163,.5)}
-          .act.liked svg{fill:var(--pk)}
-          .act.popit{animation:pop .5s cubic-bezier(.3,1.8,.5,1)}
-          @keyframes pop{0%{transform:scale(.6)}60%{transform:scale(1.35)}100%{transform:scale(1)}}
-          .pt{position:absolute;left:50%;top:50%;width:10px;height:10px;margin:-5px;pointer-events:none;color:var(--pk);animation:fly .7s ease-out forwards}
-          @keyframes fly{to{transform:translate(var(--x),var(--y)) scale(.2);opacity:0}}
-          .burst{position:absolute;width:110px;height:110px;margin:-55px 0 0 -55px;pointer-events:none;color:var(--pk);animation:burst .85s cubic-bezier(.2,.9,.3,1) forwards;filter:drop-shadow(0 8px 30px rgba(255,79,163,.7))}
-          .burst svg{width:100%;height:100%;fill:currentColor}
-          @keyframes burst{0%{transform:scale(.2) rotate(-12deg);opacity:0}30%{transform:scale(1.15) rotate(6deg);opacity:1}70%{transform:scale(1) rotate(0);opacity:1}100%{transform:scale(1.5) translateY(-60px);opacity:0}}
-          .flash{position:absolute;left:50%;top:50%;width:84px;height:84px;margin:-42px;border-radius:50%;background:rgba(0,0,0,.45);backdrop-filter:blur(10px);display:grid;place-items:center;pointer-events:none;animation:fl .6s ease-out forwards}
-          .flash svg{width:36px;height:36px}@keyframes fl{0%{transform:scale(.6);opacity:0}30%{opacity:1}100%{transform:scale(1.2);opacity:0}}
-          .fol{position:absolute;bottom:-8px;left:50%;transform:translateX(-50%);width:22px;height:22px;border-radius:50%;background:var(--g);display:grid;place-items:center;border:0;color:#fff;cursor:pointer}.fol svg{width:14px;height:14px}
-          .top2{position:absolute;top:var(--top);left:0;right:0;z-index:5;display:flex;justify-content:center;gap:6px}
-          .top2 button{border:0;background:transparent;color:rgba(255,255,255,.65);font:inherit;font-weight:700;padding:8px 14px;cursor:pointer;border-radius:999px;text-shadow:0 1px 6px #000}.top2 button.on{color:#fff;background:var(--gl)}
-          .ovt{position:absolute;font-weight:800;transform:translate(-50%,-50%);text-shadow:0 2px 10px rgba(0,0,0,.6);white-space:pre;pointer-events:none}
-          .layer{position:fixed;inset:0;z-index:50;opacity:0;transition:opacity .3s;background:var(--bg)}.layer.in{opacity:1}
-          .layer.sh{background:rgba(0,0,0,.5);display:flex;align-items:flex-end;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
-          .sheet{width:100%;max-width:520px;margin:0 auto;max-height:88vh;overflow-y:auto;background:var(--gl2);backdrop-filter:blur(40px) saturate(180%);-webkit-backdrop-filter:blur(40px) saturate(180%);border:1px solid var(--bd);border-bottom:0;border-radius:32px 32px 0 0;padding:12px 20px calc(env(safe-area-inset-bottom,0px) + 22px);transform:translateY(100%);transition:transform .5s cubic-bezier(.2,.9,.25,1)}
-          .layer.in .sheet{transform:none}
-          .grab{width:40px;height:5px;border-radius:3px;background:var(--bd);margin:0 auto 14px}
-          .sheet h3{margin:0 0 10px;font-size:20px}
-          .rowi{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--ln);cursor:pointer}.rowi:last-child{border:0}
-          .grow{flex:1;min-width:0}.grow b{display:block}.grow span{color:var(--tx2);font-size:14px}
-          .cm{display:flex;gap:10px;padding:10px 0}.cm p{margin:2px 0 0;font-size:15px}
-          .send{display:flex;gap:8px;margin-top:12px}.send input{flex:1}.send button{width:50px;padding:0;display:grid;place-items:center}
-          .chips{display:flex;gap:8px;overflow-x:auto;padding:2px 0;scrollbar-width:none}.chip{flex:none;border:1px solid var(--bd);background:var(--gl);color:var(--tx);border-radius:999px;padding:8px 14px;font:inherit;font-size:14px;font-weight:600;cursor:pointer}.chip.on{background:var(--g);border:0}
-          .back{position:absolute;top:var(--top);left:12px;z-index:6;width:42px;height:42px;border-radius:50%;border:1px solid var(--bd);background:var(--gl2);color:#fff;display:grid;place-items:center;cursor:pointer}
-          .hd{display:flex;align-items:center;gap:10px;padding:var(--top) 12px 10px 12px}.hd .grow b{font-size:17px}
-          .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:3px;margin-top:14px}
-          .grid .t{aspect-ratio:9/14;background:#111;border-radius:10px;overflow:hidden;position:relative;cursor:pointer}.grid video{width:100%;height:100%;object-fit:cover;pointer-events:none}
-          .stats{display:flex;justify-content:center;gap:28px;margin:14px 0}.stats div{text-align:center}.stats b{display:block;font-size:20px}.stats span{color:var(--tx2);font-size:13px}
-          .tabs{display:flex;background:var(--gl);border-radius:999px;padding:4px;margin-top:6px}.tabs button{flex:1;border:0;background:transparent;color:var(--tx2);font:inherit;font-weight:620;padding:9px;border-radius:999px;cursor:pointer}.tabs button.on{background:var(--gl2);color:var(--tx)}
-          .msgs{flex:1;overflow-y:auto;padding:10px 14px;display:flex;flex-direction:column;gap:8px}
-          .bub{max-width:78%;padding:10px 14px;border-radius:20px;background:var(--gl);border:1px solid var(--ln);word-wrap:break-word}.bub.me{align-self:flex-end;background:var(--g);border:0}
-          .bub img{max-width:100%;border-radius:14px;display:block}.bub .rl{display:flex;align-items:center;gap:8px;font-weight:650;cursor:pointer}
-          .chat{display:flex;flex-direction:column;height:100%}.chat .send{padding:8px 12px calc(env(safe-area-inset-bottom,0px) + 12px);margin:0}
-          .ed{display:flex;flex-direction:column;height:100%}.edp{position:relative;flex:none;height:46vh;background:#000;margin:var(--top) 14px 0;border-radius:24px;overflow:hidden}.edp video{width:100%;height:100%;object-fit:contain}.edp .ovt{pointer-events:auto;touch-action:none;cursor:grab}
-          .edc{flex:1;overflow-y:auto;padding:10px 16px calc(env(safe-area-inset-bottom,0px) + 20px)}
-          .edc h4{margin:16px 0 8px;font-size:14px;color:var(--tx2);font-weight:620}
-          input[type=range]{padding:0;height:28px;background:transparent;border:0;accent-color:#ff4fa3}
-          .emp{color:var(--tx2);text-align:center;padding:40px 20px}
-          .toast{position:fixed;left:50%;top:calc(var(--top) - 8px);transform:translate(-50%,-160%);z-index:99;background:var(--gl2);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border:1px solid var(--bd);padding:12px 20px;border-radius:999px;font-weight:620;font-size:14px;transition:transform .5s cubic-bezier(.3,1.3,.5,1);max-width:92vw;text-align:center}.toast.on{transform:translate(-50%,0)}
-          @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
-          button:focus-visible,input:focus-visible{outline:2px solid var(--pk);outline-offset:2px}
-          </style></head><body>
-          <div class="orb o1"></div><div class="orb o2"></div><div class="orb o3"></div>
-          <div id="app"></div><div class="toast" id="toast"></div>
-          <input type="file" id="fv" accept="video/*" hidden><input type="file" id="fi" accept="image/*" hidden>
-          <script src="app.js"></script>
-          </body></html>
+          html,body{margin:0;height:100%;background:#000;overflow:hidden}
+          body{display:flex;flex-direction:column;align-items:center;justify-content:center}
+          img{max-width:100vw;max-height:calc(100vh - 64px);touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+          #bar{display:flex;gap:12px;height:64px;align-items:center}
+          button{font-size:18px;padding:10px 22px;border-radius:12px;border:0;background:#333;color:#fff}
+          </style>
+          </head>
+          <body>
+          <img id="s" src="/stream" draggable="false">
+          <div id="bar">
+          <button data-k="back">Zurück</button>
+          <button data-k="home">Home</button>
+          <button data-k="recents">Übersicht</button>
+          </div>
+          <script>
+          var img = document.getElementById('s'), d = null;
+          function pos(e) {
+            var r = img.getBoundingClientRect();
+            return {x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height};
+          }
+          function send(u) { fetch(u).catch(function () {}); }
+          img.addEventListener('pointerdown', function (e) {
+            e.preventDefault();
+            img.setPointerCapture(e.pointerId);
+            d = {p: pos(e), cx: e.clientX, cy: e.clientY, t: Date.now()};
+          });
+          img.addEventListener('pointerup', function (e) {
+            if (!d) return;
+            var p = pos(e);
+            var dist = Math.hypot(e.clientX - d.cx, e.clientY - d.cy);
+            var el = Date.now() - d.t;
+            if (dist < 12) {
+              send('/tap?x=' + d.p.x + '&y=' + d.p.y + '&ms=' + (el > 500 ? 700 : 50));
+            } else {
+              var ms = Math.min(Math.max(el, 100), 1000);
+              send('/swipe?x1=' + d.p.x + '&y1=' + d.p.y + '&x2=' + p.x + '&y2=' + p.y + '&ms=' + ms);
+            }
+            d = null;
+          });
+          img.addEventListener('pointercancel', function () { d = null; });
+          document.querySelectorAll('button').forEach(function (b) {
+            b.onclick = function () { send('/key?k=' + b.dataset.k); };
+          });
+          </script>
+          </body>
+          </html>
           EOF
-          cat > main.mjs <<'EOF'
-          import { createClient } from '@supabase/supabase-js';
-          import { Share } from '@capacitor/share';
-          import { AppLauncher } from '@capacitor/app-launcher';
-
-          const SUPA_URL = '__SUPA_URL__', SUPA_KEY = '__SUPA_KEY__';
-          const sb = createClient(SUPA_URL, SUPA_KEY, { auth: { persistSession: true, autoRefreshToken: true } });
-          const $ = (s, r = document) => r.querySelector(s);
-          const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-          const IC = {
-            home: '<path d="M4 11l8-7 8 7v8a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z"/>',
-            search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>', plus: '<path d="M12 5v14M5 12h14"/>',
-            chat: '<path d="M4 5h16v11H9l-5 4z"/>', user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/>',
-            heart: '<path d="M12 20S4 14.5 4 9a4.5 4.5 0 0 1 8-2.5A4.5 4.5 0 0 1 20 9c0 5.5-8 11-8 11z"/>',
-            share: '<path d="M4 12v7h16v-7M12 3v12M7 8l5-5 5 5"/>', flag: '<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>',
-            back: '<path d="M15 5l-7 7 7 7"/>', send: '<path d="M4 12l16-8-6 16-3-7z"/>', img: '<rect x="4" y="5" width="16" height="14" rx="3"/><circle cx="9" cy="10" r="1.5"/><path d="M4 17l5-4 4 3 3-2 4 3"/>',
-            play: '<path d="M8 5v14l11-7z"/>', pause: '<path d="M8 5v14M16 5v14"/>', x: '<path d="M6 6l12 12M18 6L6 18"/>'
-          };
-          const ic = (n, f) => `<svg class="ic" viewBox="0 0 24 24" fill="${f ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${IC[n]}</svg>`;
-          const LOGO = '<svg class="logo" viewBox="0 0 100 100"><defs><linearGradient id="a" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#26263a"/><stop offset="1" stop-color="#08080c"/></linearGradient><radialGradient id="b" cx=".35" cy=".3" r=".9"><stop offset="0" stop-color="#ffe3b0"/><stop offset=".45" stop-color="#ff4fa3"/><stop offset="1" stop-color="#7b4dff"/></radialGradient></defs><rect width="100" height="100" rx="26" fill="url(#a)"/><circle cx="50" cy="50" r="33" fill="none" stroke="#fff" stroke-opacity=".22" stroke-width="2"/><circle cx="50" cy="50" r="22" fill="url(#b)"/><circle cx="42" cy="41" r="5" fill="#fff" fill-opacity=".55"/></svg>';
-          const FILT = { none: '', warm: 'sepia(.35) saturate(1.3) hue-rotate(-10deg)', cool: 'saturate(1.1) hue-rotate(15deg) brightness(1.05)', bw: 'grayscale(1)', vivid: 'saturate(1.8) contrast(1.1)', fade: 'contrast(.85) brightness(1.1) saturate(.8)', noir: 'grayscale(1) contrast(1.4) brightness(.9)' };
-          const FN = { none: 'Original', warm: 'Warm', cool: 'Kühl', bw: 'S/W', vivid: 'Intensiv', fade: 'Matt', noir: 'Noir' };
-          const REASONS = ['Spam oder Betrug', 'Nacktheit oder sexuelle Inhalte', 'Gewalt oder Gefahr', 'Hassrede', 'Mobbing oder Belästigung', 'Falsche Informationen', 'Etwas anderes'];
-
-          let me = null, prof = null, following = new Set(), tab = 'feed', feedMode = 'all', flow = false, entered = false, chatWith = null, pendAvatar = null, pend = {}, layers = [];
-          const POSTS = {};
-          const A = {};
-          const app = $('#app');
-
-          let tt;
-          function toast(m) { const t = $('#toast'); t.textContent = m; t.classList.add('on'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('on'), 2800); }
-          function layer(html, cls = '') { const d = document.createElement('div'); d.className = 'layer ' + cls; d.innerHTML = html; document.body.appendChild(d); layers.push(d); requestAnimationFrame(() => requestAnimationFrame(() => d.classList.add('in'))); return d; }
-          function sheet(html) { const d = layer(`<div class="sheet"><div class="grab"></div>${html}</div>`, 'sh'); d.addEventListener('click', e => { if (e.target === d) pop(); }); return d; }
-          function pop() { const d = layers.pop(); if (!d) return; d.classList.remove('in'); d.querySelectorAll('video').forEach(v => v.pause()); setTimeout(() => d.remove(), 350); }
-          const ini = n => esc((n || '?').trim().slice(0, 1).toUpperCase());
-          const avatar = (p, cls = '') => `<div class="av ${cls}">${p && p.avatar_url ? `<img src="${esc(p.avatar_url)}" alt="">` : ini(p && (p.full_name || p.username))}</div>`;
-          const ago = t => { const s = (Date.now() - new Date(t)) / 1000; return s < 60 ? 'jetzt' : s < 3600 ? Math.floor(s / 60) + ' Min' : s < 86400 ? Math.floor(s / 3600) + ' Std' : Math.floor(s / 86400) + ' T'; };
-          async function upload(bucket, file, name) {
-            const path = `${me.id}/${name}-${Date.now()}.${(file.name.split('.').pop() || 'bin').toLowerCase()}`;
-            const { error } = await sb.storage.from(bucket).upload(path, file, { contentType: file.type, upsert: false });
-            if (error) throw error;
-            return sb.storage.from(bucket).getPublicUrl(path).data.publicUrl;
-          }
-          async function openUrl(u) { try { await AppLauncher.openUrl({ url: u }); } catch (e) { window.open(u, '_blank'); } }
-          function busy(btn, on, txt) { if (!btn) return; btn.disabled = on; if (txt) btn.textContent = txt; }
-
-          /* ========== Anmeldung ========== */
-          function showAuth(step, msg = '') {
-            const back = step !== 'welcome' ? `<button class="lnk" data-a="authBack" style="align-self:flex-start;padding-left:0">← Zurück</button>` : '';
-            if (step === 'welcome') app.innerHTML = `<div class="auth c">${LOGO}<div class="wm">Lumo</div><p class="tag">Zeig, was dich bewegt.</p><button class="btn pri full" data-a="auth" data-v="register">Konto erstellen</button><button class="btn full" data-a="auth" data-v="login">Anmelden</button></div>`;
-            if (step === 'register') app.innerHTML = `<div class="auth">${back}<h1>Konto erstellen</h1><p class="sub">Wir senden dir einen Bestätigungscode per E-Mail.</p>
-             <div style="text-align:center"><label style="cursor:pointer"><div class="av avp" id="pv">+</div><span class="sub">Profilbild wählen</span><input type="file" id="pf" accept="image/*" hidden></label></div>
-             <label>Vor- und Nachname</label><input id="r-n" autocomplete="name"><label>Benutzername</label><input id="r-u" autocapitalize="none" placeholder="z. B. anna.k"><label>E-Mail</label><input id="r-e" type="email" autocomplete="email"><label>Passwort (mind. 8 Zeichen)</label><input id="r-p" type="password" autocomplete="new-password">
-             <div class="err" id="er">${esc(msg)}</div><button class="btn pri full" data-a="doRegister">Code senden</button></div>`;
-            if (step === 'login') app.innerHTML = `<div class="auth">${back}<h1>Willkommen zurück</h1><p class="sub">Danach bestätigst du mit einem Code per E-Mail.</p><label>E-Mail</label><input id="l-e" type="email" autocomplete="email"><label>Passwort</label><input id="l-p" type="password" autocomplete="current-password"><div class="err" id="er">${esc(msg)}</div><button class="btn pri full" data-a="doLogin">Weiter</button></div>`;
-            if (step === 'code') app.innerHTML = `<div class="auth">${back}<h1>Code eingeben</h1><p class="sub">Wir haben einen Code an ${esc(pend.email)} geschickt.</p><input class="code" id="cd" inputmode="numeric" maxlength="8" autocomplete="one-time-code" placeholder="••••••"><div class="err" id="er">${esc(msg)}</div><button class="btn pri full" data-a="doCode">Bestätigen</button><button class="lnk" data-a="resend">Code erneut senden</button></div>`;
-            const pf = $('#pf'); if (pf) pf.onchange = () => { pendAvatar = pf.files[0] || null; if (pendAvatar) $('#pv').innerHTML = `<img src="${URL.createObjectURL(pendAvatar)}" alt="">`; };
-          }
-          const er = m => { const e = $('#er'); if (e) e.textContent = m; };
-          A.auth = v => showAuth(v); A.authBack = () => { flow = false; showAuth('welcome'); };
-          A.doRegister = async (v, b) => {
-            const full_name = $('#r-n').value.trim(), username = $('#r-u').value.trim().toLowerCase(), email = $('#r-e').value.trim(), password = $('#r-p').value;
-            if (!full_name || !/^[a-z0-9._]{3,20}$/.test(username)) return er('Bitte Namen und einen Benutzernamen (3–20 Zeichen: a–z, 0–9, . _) eingeben.');
-            if (!/^\S+@\S+\.\S+$/.test(email) || password.length < 8) return er('Bitte gültige E-Mail und ein Passwort mit mind. 8 Zeichen eingeben.');
-            busy(b, true);
-            try {
-              const { data: ex } = await sb.from('profiles').select('id').eq('username', username).maybeSingle();
-              if (ex) { busy(b, false); return er('Dieser Benutzername ist schon vergeben.'); }
-              const { error } = await sb.auth.signUp({ email, password, options: { data: { full_name, username } } });
-              if (error) throw error;
-              pend = { email, mode: 'signup' }; showAuth('code');
-            } catch (e) { busy(b, false); er(e.message); }
-          };
-          A.doLogin = async (v, b) => {
-            const email = $('#l-e').value.trim(), password = $('#l-p').value; if (!email || !password) return er('Bitte E-Mail und Passwort eingeben.');
-            busy(b, true); flow = true;
-            try {
-              const { error } = await sb.auth.signInWithPassword({ email, password });
-              if (error) { if (/confirm/i.test(error.message)) { await sb.auth.resend({ type: 'signup', email }); pend = { email, mode: 'signup' }; flow = false; return showAuth('code'); } throw error; }
-              await sb.auth.signOut({ scope: 'local' });
-              const r = await sb.auth.signInWithOtp({ email, options: { shouldCreateUser: false } });
-              if (r.error) throw r.error;
-              pend = { email, mode: 'email' }; showAuth('code');
-            } catch (e) { flow = false; busy(b, false); er(/invalid login/i.test(e.message) ? 'E-Mail oder Passwort stimmt nicht.' : e.message); }
-          };
-          A.doCode = async (v, b) => {
-            const token = $('#cd').value.trim(); if (token.length < 6) return er('Bitte den Code aus der E-Mail eingeben.');
-            busy(b, true);
-            const { data, error } = await sb.auth.verifyOtp({ email: pend.email, token, type: pend.mode });
-            if (error) { busy(b, false); return er('Der Code ist falsch oder abgelaufen.'); }
-            flow = false; me = data.user; enter();
-          };
-          A.resend = async () => { try { if (pend.mode === 'signup') await sb.auth.resend({ type: 'signup', email: pend.email }); else await sb.auth.signInWithOtp({ email: pend.email, options: { shouldCreateUser: false } }); toast('Neuer Code gesendet'); } catch (e) { toast(e.message); } };
-
-          async function enter() {
-            if (entered) return; entered = true;
-            await loadProf(); await loadFollowing();
-            if (pendAvatar && prof) { try { const u = await upload('avatars', pendAvatar, 'avatar'); await sb.from('profiles').update({ avatar_url: u }).eq('id', me.id); prof.avatar_url = u; } catch (e) { } pendAvatar = null; }
-            app.innerHTML = `<div id="stage"></div><nav class="glass">${[['feed', 'home'], ['disc', 'search']].map(t => `<button data-a="go" data-v="${t[0]}">${ic(t[1])}</button>`).join('')}<button class="add" data-a="go" data-v="up">${ic('plus')}</button>${[['inbox', 'chat'], ['me', 'user']].map(t => `<button data-a="go" data-v="${t[0]}">${ic(t[1])}</button>`).join('')}</nav>`;
-            go('feed'); listen();
-          }
-          async function loadProf() { const { data } = await sb.from('profiles').select('*').eq('id', me.id).single(); prof = data; }
-          async function loadFollowing() { const { data } = await sb.from('follows').select('following_id').eq('follower_id', me.id); following = new Set((data || []).map(x => x.following_id)); }
-          function go(t) {
-            tab = t; document.querySelectorAll('nav button[data-v]').forEach(b => b.classList.toggle('on', b.dataset.v === t));
-            document.querySelectorAll('#stage video').forEach(v => v.pause());
-            const s = $('#stage'); s.innerHTML = '';
-            if (t === 'feed') renderFeed(s); if (t === 'disc') renderDisc(s); if (t === 'up') renderUp(s); if (t === 'inbox') renderInbox(s); if (t === 'me') { s.innerHTML = '<div class="page" id="mp"></div>'; renderProfile(me.id, $('#mp')); }
-          }
-          A.go = v => go(v);
-
-          /* ========== Reels ========== */
-          const SEL = '*,profiles(username,full_name,avatar_url),likes(count),comments(count)';
-          async function hydrate(rows) {
-            const ids = rows.map(r => r.id); let mine = new Set();
-            if (ids.length) { const { data } = await sb.from('likes').select('post_id').eq('user_id', me.id).in('post_id', ids); mine = new Set((data || []).map(x => x.post_id)); }
-            return rows.map(r => { const p = { ...r, lc: r.likes?.[0]?.count || 0, cc: r.comments?.[0]?.count || 0, liked: mine.has(r.id) }; POSTS[p.id] = p; return p; });
-          }
-          function reelHTML(p) {
-            const e = p.edits || {}, own = p.user_id === me.id, pr = p.profiles || {};
-            return `<div class="reel" data-id="${p.id}"><video src="${esc(p.video_url)}" playsinline loop preload="auto" data-e="${esc(JSON.stringify(e))}" style="filter:${FILT[e.filter] || ''}"></video>${(e.texts || []).map(t => `<div class="ovt" style="left:${+t.x}%;top:${+t.y}%;font-size:${+t.s}px;color:${esc(t.c)}">${esc(t.t)}</div>`).join('')}<div class="shade"></div>
-            <div class="info"><b data-a="user" data-v="${p.user_id}">@${esc(pr.username)}</b><p>${esc(p.caption)}</p></div>
-            <div class="acts"><div style="position:relative;margin-bottom:10px" data-a="user" data-v="${p.user_id}">${avatar(pr)}${!own && !following.has(p.user_id) ? `<button class="fol" data-a="follow" data-v="${p.user_id}" data-fu="${p.user_id}">${ic('plus')}</button>` : ''}</div>
-             <div><button class="act ${p.liked ? 'liked' : ''}" data-a="like" data-v="${p.id}" data-lk="${p.id}">${ic('heart')}</button><div class="cnt" data-lc="${p.id}">${p.lc}</div></div>
-             <div><button class="act" data-a="comments" data-v="${p.id}">${ic('chat')}</button><div class="cnt" data-cc="${p.id}">${p.cc}</div></div>
-             <div><button class="act" data-a="share" data-v="${p.id}">${ic('share')}</button></div>
-             <div><button class="act" data-a="report" data-v="${p.id}">${ic('flag')}</button></div></div></div>`;
-          }
-          function setupVideo(v) {
-            const e = JSON.parse(v.dataset.e || '{}'); v.playbackRate = e.speed || 1; v.muted = !!e.mute;
-            v.addEventListener('loadedmetadata', () => { if (e.trimStart) v.currentTime = e.trimStart; });
-            v.addEventListener('timeupdate', () => { if (e.trimEnd && v.currentTime >= e.trimEnd) v.currentTime = e.trimStart || 0; });
-          }
-          function mountFeed(el, posts, start = 0) {
-            el.innerHTML = posts.map(reelHTML).join('') || '<div class="emp">Noch keine Reels. Lade das erste hoch!</div>';
-            const io = new IntersectionObserver(es => es.forEach(en => { const v = en.target.querySelector('video'); if (!v) return; if (en.isIntersecting) v.play().catch(() => { }); else v.pause(); }), { root: el, threshold: .7 });
-            el.querySelectorAll('.reel').forEach(r => { io.observe(r); setupVideo(r.querySelector('video')); });
-            if (start) el.children[start]?.scrollIntoView();
-            let last = 0, tm;
-            el.onclick = e => {
-              const r = e.target.closest('.reel'); if (!r || e.target.closest('[data-a]')) return; const now = Date.now();
-              if (now - last < 300) { clearTimeout(tm); last = 0; like(r.dataset.id, true, e.clientX, e.clientY); }
-              else { last = now; tm = setTimeout(() => { const v = r.querySelector('video'); const f = document.createElement('div'); f.className = 'flash'; if (v.paused) { v.play(); f.innerHTML = ic('play', 1); } else { v.pause(); f.innerHTML = ic('pause'); } r.appendChild(f); setTimeout(() => f.remove(), 650); }, 300); }
-            };
-          }
-          async function renderFeed(s) {
-            s.innerHTML = `<div class="top2"><button data-a="mode" data-v="all" class="${feedMode === 'all' ? 'on' : ''}">Für dich</button><button data-a="mode" data-v="fol" class="${feedMode === 'fol' ? 'on' : ''}">Folge ich</button></div><div class="feed" id="feed"><div class="emp">Lade…</div></div>`;
-            let q = sb.from('posts').select(SEL).order('created_at', { ascending: false }).limit(30);
-            if (feedMode === 'fol') q = q.in('user_id', [...following, me.id]);
-            const { data, error } = await q; if (error) return toast(error.message);
-            mountFeed($('#feed'), await hydrate(data));
-          }
-          A.mode = v => { feedMode = v; go('feed'); };
-          function like(id, force, x, y) {
-            const p = POSTS[id]; if (!p) return; const btn = document.querySelector(`[data-lk="${id}"]`);
-            if (force && p.liked) { burst(id, x, y); return; }
-            p.liked = !p.liked; p.lc += p.liked ? 1 : -1;
-            document.querySelectorAll(`[data-lk="${id}"]`).forEach(b => b.classList.toggle('liked', p.liked));
-            document.querySelectorAll(`[data-lc="${id}"]`).forEach(c => c.textContent = p.lc);
-            if (p.liked) { burst(id, x, y); if (btn) { btn.classList.remove('popit'); void btn.offsetWidth; btn.classList.add('popit'); for (let i = 0; i < 7; i++) { const d = document.createElement('div'); d.className = 'pt'; d.innerHTML = ic('heart', 1); const a = Math.random() * 6.28, r = 38 + Math.random() * 26; d.style.setProperty('--x', Math.cos(a) * r + 'px'); d.style.setProperty('--y', Math.sin(a) * r + 'px'); btn.appendChild(d); setTimeout(() => d.remove(), 750); } } }
-            (p.liked ? sb.from('likes').insert({ post_id: +id, user_id: me.id }) : sb.from('likes').delete().eq('post_id', +id).eq('user_id', me.id)).then(({ error }) => { if (error) toast(error.message); });
-          }
-          function burst(id, x, y) { const r = document.querySelector(`.reel[data-id="${id}"]`); if (!r || x == null) return; const b = r.getBoundingClientRect(), d = document.createElement('div'); d.className = 'burst'; d.style.left = (x - b.left) + 'px'; d.style.top = (y - b.top) + 'px'; d.innerHTML = ic('heart', 1); r.appendChild(d); setTimeout(() => d.remove(), 900); }
-          A.like = v => like(v);
-          A.follow = async v => { await toggleFollow(v); document.querySelectorAll(`[data-fu="${v}"]`).forEach(b => b.remove()); };
-          async function toggleFollow(uid) {
-            if (following.has(uid)) { following.delete(uid); await sb.from('follows').delete().eq('follower_id', me.id).eq('following_id', uid); }
-            else { following.add(uid); const { error } = await sb.from('follows').insert({ follower_id: me.id, following_id: uid }); if (error) { following.delete(uid); toast(error.message); } }
-          }
-
-          /* ========== Kommentare, Melden, Teilen ========== */
-          A.comments = async v => {
-            const d = sheet(`<h3>Kommentare</h3><div id="cl"><div class="emp">Lade…</div></div><div class="send"><input id="ci" placeholder="Kommentar schreiben" maxlength="500"><button class="btn pri" data-a="sendC" data-v="${v}">${ic('send')}</button></div>`);
-            const load = async () => {
-              const { data } = await sb.from('comments').select('*,profiles(username,full_name,avatar_url)').eq('post_id', +v).order('created_at', { ascending: false }).limit(100);
-              $('#cl', d).innerHTML = (data || []).map(c => `<div class="cm">${avatar(c.profiles)}<div class="grow"><b style="font-size:14px">@${esc(c.profiles?.username)} <span style="color:var(--tx2);font-weight:400">${ago(c.created_at)}</span></b><p>${esc(c.body)}</p></div>${c.user_id === me.id ? `<button class="lnk" data-a="delC" data-v="${c.id}" data-p="${v}" style="padding:4px">${ic('x')}</button>` : ''}</div>`).join('') || '<div class="emp">Noch keine Kommentare.</div>';
-            };
-            d._reload = load; await load();
-          };
-          A.sendC = async v => { const i = $('#ci'), body = i.value.trim(); if (!body) return; i.value = ''; const { error } = await sb.from('comments').insert({ post_id: +v, user_id: me.id, body }); if (error) return toast(error.message); const p = POSTS[v]; if (p) { p.cc++; document.querySelectorAll(`[data-cc="${v}"]`).forEach(c => c.textContent = p.cc); } layers[layers.length - 1]._reload(); };
-          A.delC = async (v, el) => { await sb.from('comments').delete().eq('id', +v); const p = POSTS[el.dataset.p]; if (p) { p.cc = Math.max(0, p.cc - 1); document.querySelectorAll(`[data-cc="${p.id}"]`).forEach(c => c.textContent = p.cc); } layers[layers.length - 1]._reload(); };
-          A.report = v => sheet(`<h3>Reel melden</h3><p class="sub" style="margin:0 0 6px">Warum meldest du dieses Reel?</p>${REASONS.map(r => `<div class="rowi" data-a="doReport" data-v="${esc(r)}" data-p="${v}">${esc(r)}</div>`).join('')}`);
-          A.doReport = async (v, el) => { const { error } = await sb.from('reports').insert({ reporter_id: me.id, post_id: +el.dataset.p, reason: v }); pop(); toast(error ? error.message : 'Danke. Wir prüfen die Meldung.'); };
-          A.reportUser = v => sheet(`<h3>Nutzer melden</h3>${REASONS.map(r => `<div class="rowi" data-a="doReportU" data-v="${esc(r)}" data-p="${v}">${esc(r)}</div>`).join('')}`);
-          A.doReportU = async (v, el) => { const { error } = await sb.from('reports').insert({ reporter_id: me.id, user_id: el.dataset.p, reason: v }); pop(); toast(error ? error.message : 'Danke. Wir prüfen die Meldung.'); };
-          const shareText = p => `Schau dir dieses Reel von @${p.profiles?.username} auf Lumo an: ${p.video_url}`;
-          A.share = v => sheet(`<h3>Teilen</h3><div class="rowi" data-a="shFriend" data-v="${v}"><div class="grow"><b>An Freund senden</b><span>In Lumo</span></div></div><div class="rowi" data-a="shWa" data-v="${v}"><div class="grow"><b>WhatsApp</b></div></div><div class="rowi" data-a="shMore" data-v="${v}"><div class="grow"><b>Mehr Apps</b><span>Instagram, Telegram, Mail und mehr</span></div></div><div class="rowi" data-a="shCopy" data-v="${v}"><div class="grow"><b>Link kopieren</b></div></div>`);
-          A.shWa = v => { pop(); openUrl('https://wa.me/?text=' + encodeURIComponent(shareText(POSTS[v]))); };
-          A.shMore = async v => { pop(); try { await Share.share({ title: 'Lumo', text: shareText(POSTS[v]), dialogTitle: 'Teilen mit' }); } catch (e) { } };
-          A.shCopy = v => { try { navigator.clipboard.writeText(POSTS[v].video_url); } catch (e) { } pop(); toast('Link kopiert'); };
-          async function friends() { const { data } = await sb.from('follows').select('follower_id').eq('following_id', me.id); const back = new Set((data || []).map(x => x.follower_id)); const ids = [...following].filter(i => back.has(i)); if (!ids.length) return []; const { data: ps } = await sb.from('profiles').select('*').in('id', ids); return ps || []; }
-          A.shFriend = async v => { pop(); const fs = await friends(); sheet(`<h3>An Freund senden</h3>${fs.map(f => `<div class="rowi" data-a="sendReel" data-v="${f.id}" data-p="${v}">${avatar(f)}<div class="grow"><b>${esc(f.full_name || f.username)}</b><span>@${esc(f.username)}</span></div></div>`).join('') || '<div class="emp">Freunde sind Nutzer, die dir gegenseitig folgen.</div>'}`); };
-          A.sendReel = async (v, el) => { const { error } = await sb.from('messages').insert({ sender_id: me.id, receiver_id: v, post_id: +el.dataset.p }); pop(); toast(error ? error.message : 'Gesendet'); };
-          A.user = v => { if (v === me.id) { while (layers.length) pop(); go('me'); } else { const d = layer(`<div class="page" id="up2" style="padding-top:0"></div><button class="back" data-a="pop">${ic('back')}</button>`); renderProfile(v, $('#up2', d)); } };
-          A.pop = () => pop();
-
-          /* ========== Entdecken ========== */
-          async function renderDisc(s) {
-            s.innerHTML = `<div class="page"><h1>Entdecken</h1><input id="sq" placeholder="Nutzer suchen" style="margin:10px 0"><div id="sr"></div><div class="grid" id="dg"></div></div>`;
-            const { data } = await sb.from('posts').select(SEL).order('created_at', { ascending: false }).limit(30); const ps = await hydrate(data || []);
-            const g = $('#dg'); g.innerHTML = ps.map((p, i) => `<div class="t" data-a="viewer" data-v="${i}"><video src="${esc(p.video_url)}#t=0.2" preload="metadata" muted playsinline></video></div>`).join(''); g._ps = ps;
-            let tm; $('#sq').oninput = e => { clearTimeout(tm); tm = setTimeout(() => searchUsers(e.target.value.trim()), 300); };
-          }
-          async function searchUsers(q) {
-            const out = $('#sr'); if (q.length < 2) { out.innerHTML = ''; return; }
-            const { data } = await sb.from('profiles').select('*').or(`username.ilike.%${q.replace(/[,()%]/g, '')}%,full_name.ilike.%${q.replace(/[,()%]/g, '')}%`).neq('id', me.id).limit(15);
-            out.innerHTML = (data || []).map(u => `<div class="rowi" data-a="user" data-v="${u.id}">${avatar(u)}<div class="grow"><b>${esc(u.full_name || u.username)}</b><span>@${esc(u.username)}</span></div></div>`).join('') || '<div class="emp">Niemand gefunden.</div>';
-          }
-          function viewer(ps, i) { const d = layer(`<div class="feed" id="vf"></div><button class="back" data-a="pop">${ic('back')}</button>`); mountFeed($('#vf', d), ps, i); }
-          A.viewer = (v, el) => viewer(el.parentElement._ps, +v);
-
-          /* ========== Profil ========== */
-          let psub = 'reels';
-          async function renderProfile(uid, el) {
-            const own = uid === me.id; el.innerHTML = '<div class="emp">Lade…</div>';
-            const cnt = (col) => sb.from('follows').select('*', { count: 'exact', head: true }).eq(col, uid);
-            const [pr, fr, fg, po] = await Promise.all([sb.from('profiles').select('*').eq('id', uid).single(), cnt('following_id'), cnt('follower_id'), sb.from('posts').select(SEL).eq('user_id', uid).order('created_at', { ascending: false })]);
-            const p = pr.data; if (!p) { el.innerHTML = '<div class="emp">Profil nicht gefunden.</div>'; return; }
-            const posts = await hydrate(po.data || []); let shown = posts, extra = '';
-            if (own && psub === 'likes') { const { data } = await sb.from('likes').select('created_at,posts(' + SEL + ')').eq('user_id', me.id).order('created_at', { ascending: false }); shown = await hydrate((data || []).map(x => x.posts).filter(Boolean)); }
-            if (own && psub === 'reports') { const { data } = await sb.from('reports').select('*').eq('reporter_id', me.id).order('created_at', { ascending: false }); extra = (data || []).map(r => `<div class="rowi"><div class="grow"><b>${r.post_id ? 'Reel' : 'Nutzer'} gemeldet</b><span>${esc(r.reason)} · ${ago(r.created_at)}</span></div></div>`).join('') || '<div class="emp">Du hast noch nichts gemeldet.</div>'; }
-            const isF = following.has(uid), fr2 = !own && isF && (await friends()).some(f => f.id === uid);
-            el.innerHTML = `<div style="text-align:center;margin-top:${own ? 0 : 56}px">${avatar(p, 'avp')}<h1 style="font-size:24px;margin:8px 0 0">${esc(p.full_name || p.username)}</h1><div class="sub" style="margin:0">@${esc(p.username)}</div>${p.bio ? `<p style="margin:10px 0 0">${esc(p.bio)}</p>` : ''}</div>
-            <div class="stats"><div><b>${posts.length}</b><span>Reels</span></div><div><b>${fr.count || 0}</b><span>Follower</span></div><div><b>${fg.count || 0}</b><span>Folge ich</span></div></div>
-            ${own ? `<div style="display:flex;gap:8px"><button class="btn full" style="margin:0" data-a="editP">Profil bearbeiten</button><button class="btn" data-a="logout">Abmelden</button></div><div class="tabs" style="margin-top:14px">${[['reels', 'Reels'], ['likes', 'Likes'], ['reports', 'Meldungen']].map(t => `<button class="${psub === t[0] ? 'on' : ''}" data-a="psub" data-v="${t[0]}">${t[1]}</button>`).join('')}</div>`
-                : `<div style="display:flex;gap:8px"><button class="btn ${isF ? '' : 'pri'} full" style="margin:0" data-a="pfol" data-v="${uid}">${isF ? 'Folge ich' : 'Folgen'}</button>${fr2 ? `<button class="btn" data-a="chat" data-v="${uid}">Schreiben</button>` : ''}<button class="btn" data-a="reportUser" data-v="${uid}">${ic('flag')}</button></div>`}
-            ${extra ? `<div style="margin-top:10px">${extra}</div>` : `<div class="grid" id="pg">${shown.map((q, i) => `<div class="t" data-a="viewer" data-v="${i}"><video src="${esc(q.video_url)}#t=0.2" preload="metadata" muted playsinline></video></div>`).join('') || '<div class="emp" style="grid-column:1/4">Noch nichts hier.</div>'}</div>`}`;
-            const g = $('#pg', el); if (g) g._ps = shown; el._uid = uid;
-          }
-          A.psub = v => { psub = v; renderProfile(me.id, $('#mp')); };
-          A.pfol = async (v, b) => { await toggleFollow(v); renderProfile(v, b.closest('.page')); };
-          A.logout = async () => { entered = false; await sb.auth.signOut(); };
-          A.editP = () => { sheet(`<h3>Profil bearbeiten</h3><label>Name</label><input id="e-n" value="${esc(prof.full_name)}"><label>Bio</label><textarea id="e-b" rows="3" maxlength="150">${esc(prof.bio)}</textarea><label>Profilbild</label><input type="file" id="e-a" accept="image/*"><button class="btn pri full" data-a="saveP">Speichern</button>`); };
-          A.saveP = async (v, b) => { busy(b, true); try { const u = { full_name: $('#e-n').value.trim(), bio: $('#e-b').value.trim() }, f = $('#e-a').files[0]; if (f) u.avatar_url = await upload('avatars', f, 'avatar'); const { error } = await sb.from('profiles').update(u).eq('id', me.id); if (error) throw error; Object.assign(prof, u); pop(); go('me'); toast('Gespeichert'); } catch (e) { busy(b, false); toast(e.message); } };
-
-          /* ========== Upload und Editor ========== */
-          function renderUp(s) { s.innerHTML = `<div class="page"><h1>Neues Reel</h1><p class="sub">Wähle ein Video aus deiner Galerie und bearbeite es.</p><div class="glass" style="border-radius:28px;padding:30px;text-align:center"><button class="btn pri" data-a="pick">Video auswählen</button><p class="sub" style="margin:14px 0 0;font-size:13px">Bis 50 MB. Filter, Tempo, Zuschnitt, Ton und Text.</p></div></div>`; }
-          A.pick = () => $('#fv').click();
-          $('#fv').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (!f) return; if (f.size > 50 * 1024 * 1024) return toast('Das Video ist größer als 50 MB.'); openEditor(f); };
-          function openEditor(file) {
-            const ed = { filter: 'none', speed: 1, trimStart: 0, trimEnd: 0, mute: false, texts: [], dur: 0 }, url = URL.createObjectURL(file);
-            const d = layer(`<div class="ed"><div class="edp" id="ep"><video id="ev" src="${url}" playsinline loop autoplay muted></video></div><div class="edc">
-            <h4>Filter</h4><div class="chips" id="ef">${Object.keys(FILT).map(k => `<button class="chip ${k === 'none' ? 'on' : ''}" data-k="${k}">${FN[k]}</button>`).join('')}</div>
-            <h4>Tempo</h4><div class="chips" id="es">${[0.5, 1, 1.5, 2].map(s => `<button class="chip ${s === 1 ? 'on' : ''}" data-k="${s}">${s}x</button>`).join('')}</div>
-            <h4>Zuschneiden</h4><input type="range" id="t0" min="0" max="100" value="0"><input type="range" id="t1" min="0" max="100" value="100"><div class="sub" id="tl" style="margin:0;font-size:13px"></div>
-            <h4>Ton</h4><div class="chips"><button class="chip" id="em">Ton aus</button></div>
-            <h4>Text hinzufügen</h4><div class="send" style="margin:0"><input id="et" placeholder="Text"><button class="btn" id="ea" style="width:auto;padding:0 16px">Hinzufügen</button></div>
-            <div class="chips" id="ec" style="margin-top:8px">${['#ffffff', '#ffd166', '#ff4fa3', '#7bdcff', '#9dff9d'].map((c, i) => `<button class="chip ${i ? '' : 'on'}" data-k="${c}" style="color:${c}">Aa</button>`).join('')}</div>
-            <h4>Beschreibung</h4><textarea id="ecap" rows="2" maxlength="200" placeholder="Schreibe etwas zu deinem Reel"></textarea>
-            <button class="btn pri full" id="epub">Veröffentlichen</button><button class="btn full" data-a="pop">Abbrechen</button></div></div>`);
-            const v = $('#ev', d), col = { c: '#ffffff' }, sel = (box, k) => box.querySelectorAll('.chip').forEach(c => c.classList.toggle('on', c.dataset.k === String(k)));
-            const upd = () => { v.style.filter = FILT[ed.filter]; v.playbackRate = ed.speed; v.muted = ed.mute; $('#tl', d).textContent = `Von ${ed.trimStart.toFixed(1)} s bis ${ed.trimEnd.toFixed(1)} s`; };
-            v.onloadedmetadata = () => { ed.dur = v.duration; ed.trimEnd = v.duration; upd(); };
-            v.ontimeupdate = () => { if (v.currentTime >= ed.trimEnd - 0.05 || v.currentTime < ed.trimStart) v.currentTime = ed.trimStart; };
-            $('#ef', d).onclick = e => { const k = e.target.dataset.k; if (!k) return; ed.filter = k; sel($('#ef', d), k); upd(); };
-            $('#es', d).onclick = e => { const k = e.target.dataset.k; if (!k) return; ed.speed = +k; sel($('#es', d), k); upd(); };
-            $('#ec', d).onclick = e => { const k = e.target.dataset.k; if (!k) return; col.c = k; sel($('#ec', d), k); };
-            $('#t0', d).oninput = e => { ed.trimStart = Math.min(e.target.value / 100 * ed.dur, ed.trimEnd - 0.5); v.currentTime = ed.trimStart; upd(); };
-            $('#t1', d).oninput = e => { ed.trimEnd = Math.max(e.target.value / 100 * ed.dur, ed.trimStart + 0.5); upd(); };
-            $('#em', d).onclick = e => { ed.mute = !ed.mute; e.target.classList.toggle('on', ed.mute); upd(); };
-            $('#ea', d).onclick = () => { const t = $('#et', d).value.trim(); if (!t) return; const o = { t, x: 50, y: 50, s: 28, c: col.c }; ed.texts.push(o); const el = document.createElement('div'); el.className = 'ovt'; el.textContent = t; el.style.cssText = `left:50%;top:50%;font-size:28px;color:${col.c}`; $('#ep', d).appendChild(el); $('#et', d).value = '';
-              el.onpointerdown = ev => { el.setPointerCapture(ev.pointerId); el.onpointermove = m => { const r = $('#ep', d).getBoundingClientRect(); o.x = Math.max(5, Math.min(95, (m.clientX - r.left) / r.width * 100)); o.y = Math.max(5, Math.min(95, (m.clientY - r.top) / r.height * 100)); el.style.left = o.x + '%'; el.style.top = o.y + '%'; }; el.onpointerup = () => { el.onpointermove = null; }; };
-              el.ondblclick = () => { ed.texts.splice(ed.texts.indexOf(o), 1); el.remove(); }; };
-            $('#epub', d).onclick = async e => {
-              const b = e.target; busy(b, true, 'Wird hochgeladen…');
-              try { const video_url = await upload('media', file, 'post'); const edits = { filter: ed.filter, speed: ed.speed, trimStart: +ed.trimStart.toFixed(2), trimEnd: ed.trimEnd >= ed.dur - 0.1 ? 0 : +ed.trimEnd.toFixed(2), mute: ed.mute, texts: ed.texts };
-                const { error } = await sb.from('posts').insert({ user_id: me.id, video_url, caption: $('#ecap', d).value.trim(), edits }); if (error) throw error;
-                pop(); toast('Reel veröffentlicht'); go('feed'); } catch (err) { busy(b, false, 'Veröffentlichen'); toast(err.message); }
-            };
-          }
-
-          /* ========== Nachrichten ========== */
-          async function renderInbox(s) {
-            s.innerHTML = '<div class="page"><h1>Nachrichten</h1><p class="sub">Freunde sind Nutzer, die sich gegenseitig folgen.</p><div id="fl"><div class="emp">Lade…</div></div></div>';
-            const fs = await friends(); $('#fl').innerHTML = fs.map(f => `<div class="rowi" data-a="chat" data-v="${f.id}">${avatar(f)}<div class="grow"><b>${esc(f.full_name || f.username)}</b><span>@${esc(f.username)}</span></div></div>`).join('') || '<div class="emp">Noch keine Freunde. Folge Leuten, die dir auch folgen.</div>';
-          }
-          function bubble(m) {
-            let inner = '';
-            if (m.media_url) inner += `<img src="${esc(m.media_url)}" alt="">`;
-            if (m.post_id) inner += `<div class="rl" data-a="openPost" data-v="${m.post_id}">${ic('play', 1)} Reel ansehen</div>`;
-            if (m.body) inner += `<div>${esc(m.body)}</div>`;
-            return `<div class="bub ${m.sender_id === me.id ? 'me' : ''}">${inner}</div>`;
-          }
-          A.chat = async v => {
-            const { data: u } = await sb.from('profiles').select('*').eq('id', v).single(); chatWith = v;
-            const d = layer(`<div class="chat"><div class="hd"><button class="btn sm" data-a="closeChat" style="padding:8px">${ic('back')}</button>${avatar(u)}<div class="grow"><b>${esc(u.full_name || u.username)}</b></div></div><div class="msgs" id="ms"></div><div class="send"><button class="btn" data-a="pickImg" style="width:50px;padding:0;display:grid;place-items:center">${ic('img')}</button><input id="mi" placeholder="Nachricht" maxlength="1000"><button class="btn pri" data-a="sendM" data-v="${v}" style="width:50px;padding:0;display:grid;place-items:center">${ic('send')}</button></div></div>`);
-            const { data } = await sb.from('messages').select('*').or(`and(sender_id.eq.${me.id},receiver_id.eq.${v}),and(sender_id.eq.${v},receiver_id.eq.${me.id})`).order('created_at', { ascending: true }).limit(200);
-            const ms = $('#ms', d); ms.innerHTML = (data || []).map(bubble).join(''); ms.scrollTop = ms.scrollHeight;
-          };
-          A.closeChat = () => { chatWith = null; pop(); };
-          A.sendM = async v => { const i = $('#mi'), body = i.value.trim(); if (!body) return; i.value = ''; const { data, error } = await sb.from('messages').insert({ sender_id: me.id, receiver_id: v, body }).select().single(); if (error) return toast(error.message); addMsg(data); };
-          A.pickImg = () => $('#fi').click();
-          $('#fi').onchange = async e => { const f = e.target.files[0]; e.target.value = ''; if (!f || !chatWith) return; try { const media_url = await upload('media', f, 'chat'); const { data, error } = await sb.from('messages').insert({ sender_id: me.id, receiver_id: chatWith, media_url }).select().single(); if (error) throw error; addMsg(data); } catch (err) { toast(err.message); } };
-          function addMsg(m) { const ms = $('#ms'); if (!ms) return; ms.insertAdjacentHTML('beforeend', bubble(m)); ms.scrollTop = ms.scrollHeight; }
-          A.openPost = async v => { const { data } = await sb.from('posts').select(SEL).eq('id', +v).single(); if (!data) return toast('Dieses Reel gibt es nicht mehr.'); viewer(await hydrate([data]), 0); };
-          function listen() {
-            sb.channel('inbox-' + me.id).on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: 'receiver_id=eq.' + me.id }, async pl => {
-              const m = pl.new; if (chatWith === m.sender_id) addMsg(m); else { const { data } = await sb.from('profiles').select('username').eq('id', m.sender_id).single(); toast('Neue Nachricht von @' + (data?.username || '')); }
-            }).subscribe();
-          }
-
-          /* ========== Start ========== */
-          document.addEventListener('click', e => { const a = e.target.closest('[data-a]'); if (!a || a.disabled) return; const f = A[a.dataset.a]; if (f) f(a.dataset.v, a); });
-          sb.auth.onAuthStateChange((ev, s) => { if (flow) return; if (s && s.user && !me) { me = s.user; enter(); } if (!s && me) { me = null; entered = false; showAuth('welcome'); } });
-          if (SUPA_URL.startsWith('__')) app.innerHTML = '<div class="auth c"><h1>Einrichtung fehlt</h1><p class="sub">Trage SUPABASE_URL und SUPABASE_ANON_KEY als GitHub-Secrets ein und baue die App neu.</p></div>';
-          else sb.auth.getSession().then(({ data }) => { if (data.session) { me = data.session.user; enter(); } else showAuth('welcome'); });
-          EOF
-          cat > icons.js <<'EOF'
-          const sharp = require('sharp');
-          const fs = require('fs');
-          fs.mkdirSync('assets', { recursive: true });
-          const defs = '<defs><linearGradient id="a" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#26263a"/><stop offset="1" stop-color="#08080c"/></linearGradient><radialGradient id="b" cx=".35" cy=".3" r=".9"><stop offset="0" stop-color="#ffe3b0"/><stop offset=".45" stop-color="#ff4fa3"/><stop offset="1" stop-color="#7b4dff"/></radialGradient></defs>';
-          const mark = '<circle cx="50" cy="50" r="33" fill="none" stroke="#fff" stroke-opacity=".22" stroke-width="2"/><circle cx="50" cy="50" r="22" fill="url(#b)"/><circle cx="42" cy="41" r="5" fill="#fff" fill-opacity=".55"/>';
-          const wrap = (inner) => '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">' + defs + inner + '</svg>';
-          const small = '<g transform="translate(50 50) scale(0.85) translate(-50 -50)">' + mark + '</g>';
-          const out = async (name, svg) => sharp(Buffer.from(svg)).resize(1024, 1024).png().toFile('assets/' + name);
-          (async () => {
-            await out('icon-only.png', wrap('<rect width="100" height="100" fill="url(#a)"/>' + mark));
-            await out('icon-background.png', wrap('<rect width="100" height="100" fill="url(#a)"/>'));
-            await out('icon-foreground.png', wrap(small));
-            console.log('Icons erstellt');
-          })();
-          EOF
-
-      - name: Abhängigkeiten installieren
-        working-directory: app
-        run: |
-          npm init -y
-          npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6 @capacitor/share@6 @capacitor/app-launcher@6 @capacitor/assets @supabase/supabase-js esbuild sharp
-          npx cap init Lumo de.lumo.app --web-dir www
-
-      - name: Web-App bündeln
-        working-directory: app
-        run: |
-          sed -i "s#__SUPA_URL__#$SUPABASE_URL#; s#__SUPA_KEY__#$SUPABASE_ANON_KEY#" main.mjs
-          npx esbuild main.mjs --bundle --minify --format=iife --outfile=www/app.js
-          npx cap add android
-
-      - name: Logo und App-Icons erzeugen
-        working-directory: app
-        run: |
-          node icons.js
-          npx capacitor-assets generate --android
-          npx cap sync android
 
       - name: APK bauen
-        working-directory: app/android
-        run: |
-          chmod +x gradlew
-          ./gradlew assembleDebug
+        run: gradle assembleDebug --no-daemon
 
-      - name: APK hochladen
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: Lumo-APK
-          path: app/android/app/build/outputs/apk/debug/app-debug.apk
+          name: ScreenMirror-APK
+          path: app/build/outputs/apk/debug/app-debug.apk

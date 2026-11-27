@@ -1,4 +1,7 @@
-name: Build APK
+# Marktkasse – baut automatisch eine Android-APK.
+# Ablage im Repo: .github/workflows/build.yml
+# Fertige APK: Actions-Tab > letzter Lauf > Artifacts > "Marktkasse-APK"
+name: Build Marktkasse APK
 
 on:
   push:
@@ -8,58 +11,58 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-java@v4
+      - name: Java 17
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - uses: gradle/actions/setup-gradle@v4
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Gradle
+        uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
 
-      - name: Projekt erzeugen
+      - name: Android-Projekt erzeugen
         run: |
-          mkdir -p app/src/main/java/com/example/mirror app/src/main/res/xml app/src/main/res/values app/src/main/assets
-
-          cat > settings.gradle <<'EOF'
+          mkdir -p app/src/main/java/de/markt/kasse app/src/main/res/values app/src/main/res/mipmap-anydpi-v26 app/src/main/res/drawable app/src/main/assets
+          cat > settings.gradle << 'EOF'
           pluginManagement {
-              repositories {
-                  google()
-                  mavenCentral()
-                  gradlePluginPortal()
-              }
+              repositories { google(); mavenCentral(); gradlePluginPortal() }
           }
           dependencyResolutionManagement {
-              repositories {
-                  google()
-                  mavenCentral()
-              }
+              repositories { google(); mavenCentral() }
           }
-          rootProject.name = "ScreenMirror"
+          rootProject.name = "Marktkasse"
           include ':app'
           EOF
-
-          cat > build.gradle <<'EOF'
+          cat > build.gradle << 'EOF'
           plugins {
               id 'com.android.application' version '8.5.2' apply false
           }
           EOF
-
-          cat > app/build.gradle <<'EOF'
+          cat > gradle.properties << 'EOF'
+          org.gradle.jvmargs=-Xmx2048m
+          android.useAndroidX=true
+          EOF
+          cat > app/build.gradle << 'EOF'
           plugins {
               id 'com.android.application'
           }
           android {
-              namespace 'com.example.mirror'
+              namespace 'de.markt.kasse'
               compileSdk 34
               defaultConfig {
-                  applicationId 'com.example.mirror'
+                  applicationId 'de.markt.kasse'
                   minSdk 26
                   targetSdk 34
                   versionCode 1
                   versionName '1.0'
+              }
+              buildTypes {
+                  release { minifyEnabled false }
               }
               compileOptions {
                   sourceCompatibility JavaVersion.VERSION_17
@@ -67,566 +70,815 @@ jobs:
               }
           }
           EOF
-
-          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          cat > app/src/main/AndroidManifest.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              <uses-permission android:name="android.permission.INTERNET" />
-              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
-              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
               <application
-                  android:label="Screen Mirror"
-                  android:theme="@android:style/Theme.Material.Light.NoActionBar">
-                  <activity android:name=".MainActivity" android:exported="true">
+                  android:label="Marktkasse"
+                  android:icon="@mipmap/ic_launcher"
+                  android:roundIcon="@mipmap/ic_launcher"
+                  android:theme="@style/AppTheme"
+                  android:allowBackup="true">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:screenOrientation="portrait"
+                      android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
+                      android:windowSoftInputMode="adjustResize">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
                           <category android:name="android.intent.category.LAUNCHER" />
                       </intent-filter>
                   </activity>
-                  <service
-                      android:name=".ScreenService"
-                      android:exported="false"
-                      android:foregroundServiceType="mediaProjection" />
-                  <service
-                      android:name=".ControlService"
-                      android:exported="true"
-                      android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
-                      <intent-filter>
-                          <action android:name="android.accessibilityservice.AccessibilityService" />
-                      </intent-filter>
-                      <meta-data
-                          android:name="android.accessibilityservice"
-                          android:resource="@xml/accessibility_config" />
-                  </service>
               </application>
           </manifest>
           EOF
-
-          cat > app/src/main/java/com/example/mirror/MainActivity.java <<'EOF'
-          package com.example.mirror;
+          cat > app/src/main/java/de/markt/kasse/MainActivity.java << 'EOF'
+          package de.markt.kasse;
 
           import android.app.Activity;
           import android.content.Intent;
-          import android.media.projection.MediaProjectionManager;
-          import android.os.Build;
+          import android.graphics.Color;
           import android.os.Bundle;
-          import android.provider.Settings;
-          import android.view.Gravity;
-          import android.widget.Button;
-          import android.widget.LinearLayout;
-          import android.widget.TextView;
-          import java.net.Inet4Address;
-          import java.net.InetAddress;
-          import java.net.NetworkInterface;
-          import java.util.Collections;
+          import android.view.HapticFeedbackConstants;
+          import android.view.WindowManager;
+          import android.webkit.JavascriptInterface;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
 
           public class MainActivity extends Activity {
-              private static final int REQ = 1;
-              private TextView info;
+              private WebView web;
 
               @Override
-              protected void onCreate(Bundle b) {
-                  super.onCreate(b);
-                  LinearLayout l = new LinearLayout(this);
-                  l.setOrientation(LinearLayout.VERTICAL);
-                  l.setGravity(Gravity.CENTER);
-                  l.setPadding(48, 48, 48, 48);
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                  getWindow().setStatusBarColor(Color.parseColor("#0A1A13"));
+                  getWindow().setNavigationBarColor(Color.parseColor("#0A1A13"));
+                  web = new WebView(this);
+                  web.setBackgroundColor(Color.parseColor("#07120D"));
+                  WebSettings s = web.getSettings();
+                  s.setJavaScriptEnabled(true);
+                  s.setDomStorageEnabled(true);
+                  s.setAllowFileAccess(true);
+                  s.setTextZoom(100);
+                  web.setOverScrollMode(WebView.OVER_SCROLL_NEVER);
+                  web.setWebViewClient(new WebViewClient());
+                  web.addJavascriptInterface(new Bridge(), "Android");
+                  setContentView(web);
+                  web.loadUrl("file:///android_asset/index.html");
+              }
 
-                  info = new TextView(this);
-                  info.setTextSize(20);
-                  info.setGravity(Gravity.CENTER);
-
-                  Button start = new Button(this);
-                  start.setText("Spiegeln starten");
-                  start.setOnClickListener(v -> {
-                      MediaProjectionManager m =
-                          (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
-                      startActivityForResult(m.createScreenCaptureIntent(), REQ);
+              @Override
+              public void onBackPressed() {
+                  web.evaluateJavascript("window.handleBack ? handleBack() : false", value -> {
+                      if (!"true".equals(value)) finish();
                   });
-
-                  Button stop = new Button(this);
-                  stop.setText("Stoppen");
-                  stop.setOnClickListener(v -> {
-                      Intent i = new Intent(this, ScreenService.class);
-                      i.setAction("STOP");
-                      startService(i);
-                  });
-
-                  Button acc = new Button(this);
-                  acc.setText("Steuerung aktivieren");
-                  acc.setOnClickListener(v ->
-                      startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
-
-                  l.addView(info);
-                  l.addView(acc);
-                  l.addView(start);
-                  l.addView(stop);
-                  setContentView(l);
-
-                  if (Build.VERSION.SDK_INT >= 33) {
-                      requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 2);
-                  }
               }
 
-              @Override
-              protected void onResume() {
-                  super.onResume();
-                  String ip = findIp();
-                  if (ip == null) {
-                      info.setText("Kein WLAN gefunden. Verbinde das Handy mit WLAN oder starte den Hotspot.");
-                  } else {
-                      info.setText("\u00d6ffne auf dem iPad in Safari:\n\nhttp://" + ip + ":8080"
-                          + "\n\nSteuerung: " + (ControlService.instance != null ? "an" : "aus"));
+              public class Bridge {
+                  @JavascriptInterface
+                  public void share(final String text, final String title) {
+                      runOnUiThread(() -> {
+                          Intent i = new Intent(Intent.ACTION_SEND);
+                          i.setType("text/plain");
+                          i.putExtra(Intent.EXTRA_SUBJECT, title);
+                          i.putExtra(Intent.EXTRA_TEXT, text);
+                          startActivity(Intent.createChooser(i, title));
+                      });
                   }
-              }
 
-              @Override
-              protected void onActivityResult(int req, int res, Intent data) {
-                  super.onActivityResult(req, res, data);
-                  if (req == REQ && res == RESULT_OK && data != null) {
-                      Intent i = new Intent(this, ScreenService.class);
-                      i.putExtra("code", res);
-                      i.putExtra("data", data);
-                      startForegroundService(i);
+                  @JavascriptInterface
+                  public void haptic() {
+                      runOnUiThread(() -> web.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY));
                   }
-              }
-
-              private static String findIp() {
-                  try {
-                      for (NetworkInterface ni : Collections.list(NetworkInterface.getNetworkInterfaces())) {
-                          for (InetAddress a : Collections.list(ni.getInetAddresses())) {
-                              if (!a.isLoopbackAddress() && a instanceof Inet4Address && a.isSiteLocalAddress()) {
-                                  return a.getHostAddress();
-                              }
-                          }
-                      }
-                  } catch (Exception e) {
-                  }
-                  return null;
               }
           }
           EOF
-
-          cat > app/src/main/java/com/example/mirror/ScreenService.java <<'EOF'
-          package com.example.mirror;
-
-          import android.app.Notification;
-          import android.app.NotificationChannel;
-          import android.app.NotificationManager;
-          import android.app.Service;
-          import android.content.Intent;
-          import android.content.pm.ServiceInfo;
-          import android.graphics.Bitmap;
-          import android.graphics.PixelFormat;
-          import android.hardware.display.DisplayManager;
-          import android.hardware.display.VirtualDisplay;
-          import android.media.Image;
-          import android.media.ImageReader;
-          import android.media.projection.MediaProjection;
-          import android.media.projection.MediaProjectionManager;
-          import android.os.Build;
-          import android.os.Handler;
-          import android.os.HandlerThread;
-          import android.os.IBinder;
-          import android.util.DisplayMetrics;
-          import android.view.WindowManager;
-          import java.io.BufferedReader;
-          import java.io.ByteArrayOutputStream;
-          import java.io.InputStreamReader;
-          import java.io.OutputStream;
-          import java.net.ServerSocket;
-          import java.net.Socket;
-          import java.nio.ByteBuffer;
-
-          public class ScreenService extends Service {
-              private static final String HTML =
-                  "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
-                  + "<title>Mirror</title></head><body style='margin:0;background:#000'>"
-                  + "<img src='/stream' style='width:100vw;height:100vh;object-fit:contain'></body></html>";
-
-              private MediaProjection projection;
-              private VirtualDisplay vd;
-              private ImageReader reader;
-              private HandlerThread ht;
-              private ServerSocket server;
-              private volatile boolean running = false;
-              static volatile int screenW = 1080;
-              static volatile int screenH = 2340;
-              private byte[] pageBytes;
-              private volatile byte[] frame;
-              private volatile long frameNo = 0;
-              private final Object lock = new Object();
-
-              @Override
-              public IBinder onBind(Intent i) {
-                  return null;
-              }
-
-              @Override
-              public int onStartCommand(Intent intent, int flags, int startId) {
-                  if (intent == null) return START_NOT_STICKY;
-                  if ("STOP".equals(intent.getAction())) {
-                      stopAll();
-                      stopSelf();
-                      return START_NOT_STICKY;
-                  }
-                  if (running) return START_NOT_STICKY;
-
-                  NotificationManager nm = getSystemService(NotificationManager.class);
-                  nm.createNotificationChannel(
-                      new NotificationChannel("mirror", "Spiegeln", NotificationManager.IMPORTANCE_LOW));
-                  Notification n = new Notification.Builder(this, "mirror")
-                      .setContentTitle("Bildschirm wird gespiegelt")
-                      .setSmallIcon(android.R.drawable.ic_menu_view)
-                      .build();
-                  startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
-
-                  try {
-                      int code = intent.getIntExtra("code", 0);
-                      Intent data = intent.getParcelableExtra("data");
-                      MediaProjectionManager mpm =
-                          (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
-                      projection = mpm.getMediaProjection(code, data);
-
-                      ht = new HandlerThread("capture");
-                      ht.start();
-                      Handler h = new Handler(ht.getLooper());
-
-                      projection.registerCallback(new MediaProjection.Callback() {
-                          @Override
-                          public void onStop() {
-                              stopAll();
-                          }
-                      }, h);
-
-                      DisplayMetrics dm = new DisplayMetrics();
-                      ((WindowManager) getSystemService(WINDOW_SERVICE)).getDefaultDisplay().getRealMetrics(dm);
-                      screenW = dm.widthPixels;
-                      screenH = dm.heightPixels;
-                      loadPage();
-                      int w = (dm.widthPixels / 2) & ~1;
-                      int hh = (dm.heightPixels / 2) & ~1;
-
-                      reader = ImageReader.newInstance(w, hh, PixelFormat.RGBA_8888, 2);
-                      reader.setOnImageAvailableListener(r -> onFrame(r), h);
-                      vd = projection.createVirtualDisplay("mirror", w, hh, dm.densityDpi / 2,
-                          DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, reader.getSurface(), null, h);
-
-                      running = true;
-                      new Thread(this::serve).start();
-                  } catch (Exception e) {
-                      stopSelf();
-                  }
-                  return START_NOT_STICKY;
-              }
-
-              private void onFrame(ImageReader r) {
-                  Image img = null;
-                  try {
-                      img = r.acquireLatestImage();
-                      if (img == null) return;
-                      Image.Plane p = img.getPlanes()[0];
-                      ByteBuffer buf = p.getBuffer();
-                      int ps = p.getPixelStride();
-                      int rs = p.getRowStride();
-                      int w = img.getWidth();
-                      int hgt = img.getHeight();
-                      Bitmap bmp = Bitmap.createBitmap(rs / ps, hgt, Bitmap.Config.ARGB_8888);
-                      bmp.copyPixelsFromBuffer(buf);
-                      Bitmap crop = Bitmap.createBitmap(bmp, 0, 0, w, hgt);
-                      ByteArrayOutputStream bos = new ByteArrayOutputStream();
-                      crop.compress(Bitmap.CompressFormat.JPEG, 65, bos);
-                      if (crop != bmp) crop.recycle();
-                      bmp.recycle();
-                      synchronized (lock) {
-                          frame = bos.toByteArray();
-                          frameNo++;
-                          lock.notifyAll();
-                      }
-                  } catch (Exception e) {
-                  } finally {
-                      if (img != null) img.close();
-                  }
-              }
-
-              private void serve() {
-                  try {
-                      server = new ServerSocket(8080);
-                      while (running) {
-                          Socket s = server.accept();
-                          new Thread(() -> handle(s)).start();
-                      }
-                  } catch (Exception e) {
-                  }
-              }
-
-              private void handle(Socket s) {
-                  try {
-                      s.setTcpNoDelay(true);
-                      BufferedReader in = new BufferedReader(new InputStreamReader(s.getInputStream()));
-                      String line = in.readLine();
-                      if (line == null) return;
-                      String l;
-                      while ((l = in.readLine()) != null && !l.isEmpty()) {
-                      }
-                      OutputStream out = s.getOutputStream();
-                      String path = line.split(" ")[1];
-                      if (path.startsWith("/tap") || path.startsWith("/swipe") || path.startsWith("/key")) {
-                          control(path);
-                          out.write("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok".getBytes());
-                          out.flush();
-                      } else if (path.startsWith("/stream")) {
-                          out.write(("HTTP/1.1 200 OK\r\n"
-                              + "Content-Type: multipart/x-mixed-replace; boundary=frame\r\n"
-                              + "Cache-Control: no-cache\r\n"
-                              + "Connection: close\r\n\r\n").getBytes());
-                          long seen = 0;
-                          while (running) {
-                              byte[] f;
-                              synchronized (lock) {
-                                  while (running && frameNo == seen) lock.wait(1000);
-                                  f = frame;
-                                  seen = frameNo;
-                              }
-                              if (f == null) continue;
-                              out.write(("--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
-                                  + f.length + "\r\n\r\n").getBytes());
-                              out.write(f);
-                              out.write("\r\n".getBytes());
-                              out.flush();
-                          }
-                      } else {
-                          byte[] page = pageBytes != null ? pageBytes : HTML.getBytes("UTF-8");
-                          out.write(("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n"
-                              + "Content-Length: " + page.length + "\r\nConnection: close\r\n\r\n").getBytes());
-                          out.write(page);
-                          out.flush();
-                      }
-                  } catch (Exception e) {
-                  } finally {
-                      try {
-                          s.close();
-                      } catch (Exception e) {
-                      }
-                  }
-              }
-
-              private void loadPage() {
-                  try {
-                      java.io.InputStream is = getAssets().open("index.html");
-                      ByteArrayOutputStream bo = new ByteArrayOutputStream();
-                      byte[] b = new byte[4096];
-                      int n;
-                      while ((n = is.read(b)) > 0) bo.write(b, 0, n);
-                      is.close();
-                      pageBytes = bo.toByteArray();
-                  } catch (Exception e) {
-                  }
-              }
-
-              private static String param(String path, String key) {
-                  int qm = path.indexOf('?');
-                  if (qm < 0) return null;
-                  for (String kv : path.substring(qm + 1).split("&")) {
-                      int e = kv.indexOf('=');
-                      if (e > 0 && kv.substring(0, e).equals(key)) return kv.substring(e + 1);
-                  }
-                  return null;
-              }
-
-              private static float f(String path, String key) {
-                  try {
-                      return Float.parseFloat(param(path, key));
-                  } catch (Exception e) {
-                      return 0f;
-                  }
-              }
-
-              private static float clamp(float v, int max) {
-                  return Math.max(1f, Math.min(max - 1f, v));
-              }
-
-              private void control(String path) {
-                  ControlService c = ControlService.instance;
-                  if (c == null) return;
-                  try {
-                      if (path.startsWith("/tap")) {
-                          float x = clamp(f(path, "x") * screenW, screenW);
-                          float y = clamp(f(path, "y") * screenH, screenH);
-                          c.swipe(x, y, x, y, (long) f(path, "ms"));
-                      } else if (path.startsWith("/swipe")) {
-                          c.swipe(clamp(f(path, "x1") * screenW, screenW), clamp(f(path, "y1") * screenH, screenH),
-                              clamp(f(path, "x2") * screenW, screenW), clamp(f(path, "y2") * screenH, screenH),
-                              (long) f(path, "ms"));
-                      } else if (path.startsWith("/key")) {
-                          c.key(param(path, "k"));
-                      }
-                  } catch (Exception e) {
-                  }
-              }
-
-              private synchronized void stopAll() {
-                  if (!running) return;
-                  running = false;
-                  try {
-                      server.close();
-                  } catch (Exception e) {
-                  }
-                  synchronized (lock) {
-                      lock.notifyAll();
-                  }
-                  try {
-                      if (vd != null) vd.release();
-                  } catch (Exception e) {
-                  }
-                  try {
-                      if (reader != null) reader.close();
-                  } catch (Exception e) {
-                  }
-                  try {
-                      if (projection != null) projection.stop();
-                  } catch (Exception e) {
-                  }
-                  if (ht != null) ht.quitSafely();
-                  stopForeground(true);
-              }
-
-              @Override
-              public void onDestroy() {
-                  stopAll();
-                  super.onDestroy();
-              }
-          }
-          EOF
-
-      - name: Steuerung erzeugen
-        run: |
-          cat > app/src/main/res/values/strings.xml <<'EOF'
+          cat > app/src/main/res/values/styles.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
           <resources>
-              <string name="acc_desc">Erlaubt Fernsteuerung vom iPad aus</string>
+              <style name="AppTheme" parent="@android:style/Theme.Material.NoActionBar">
+                  <item name="android:windowBackground">@color/bg</item>
+                  <item name="android:statusBarColor">@color/bg</item>
+                  <item name="android:navigationBarColor">@color/bg</item>
+              </style>
+              <color name="bg">#0A1A13</color>
           </resources>
           EOF
-
-          cat > app/src/main/res/xml/accessibility_config.xml <<'EOF'
+          cat > app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
-          <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-              android:accessibilityEventTypes="typeWindowStateChanged"
-              android:accessibilityFeedbackType="feedbackGeneric"
-              android:canPerformGestures="true"
-              android:description="@string/acc_desc"
-              android:notificationTimeout="100" />
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@drawable/ic_bg" />
+              <foreground android:drawable="@drawable/ic_fg" />
+          </adaptive-icon>
+          EOF
+          cat > app/src/main/res/drawable/ic_bg.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android">
+              <gradient android:angle="135" android:startColor="#7A1630" android:centerColor="#123A2A" android:endColor="#1F8A5B" />
+          </shape>
+          EOF
+          cat > app/src/main/res/drawable/ic_fg.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp" android:height="108dp"
+              android:viewportWidth="108" android:viewportHeight="108">
+              <path android:strokeColor="#FFE2A3" android:strokeWidth="2.2" android:fillColor="#00000000"
+                  android:pathData="M54,22.5 m-3.5,0 a3.5,3.5 0 1,0 7,0 a3.5,3.5 0 1,0 -7,0" />
+              <path android:fillColor="#FFD27A"
+                  android:pathData="M54,32 L59.29,46.72 L74.92,47.2 L62.56,56.78 L66.93,71.8 L54,63 L41.07,71.8 L45.44,56.78 L33.08,47.2 L48.71,46.72 Z" />
+              <path android:fillColor="#55FFFFFF"
+                  android:pathData="M54,32 L59.29,46.72 L54,48 L48.71,46.72 Z" />
+          </vector>
           EOF
 
-          cat > app/src/main/java/com/example/mirror/ControlService.java <<'EOF'
-          package com.example.mirror;
-
-          import android.accessibilityservice.AccessibilityService;
-          import android.accessibilityservice.GestureDescription;
-          import android.content.Intent;
-          import android.graphics.Path;
-          import android.view.accessibility.AccessibilityEvent;
-
-          public class ControlService extends AccessibilityService {
-              static volatile ControlService instance;
-
-              @Override
-              protected void onServiceConnected() {
-                  instance = this;
-              }
-
-              @Override
-              public void onAccessibilityEvent(AccessibilityEvent e) {
-              }
-
-              @Override
-              public void onInterrupt() {
-              }
-
-              @Override
-              public boolean onUnbind(Intent i) {
-                  instance = null;
-                  return super.onUnbind(i);
-              }
-
-              void swipe(float x1, float y1, float x2, float y2, long ms) {
-                  Path p = new Path();
-                  p.moveTo(x1, y1);
-                  if (x1 != x2 || y1 != y2) p.lineTo(x2, y2);
-                  GestureDescription.StrokeDescription s =
-                      new GestureDescription.StrokeDescription(p, 0, Math.max(ms, 1L));
-                  dispatchGesture(new GestureDescription.Builder().addStroke(s).build(), null, null);
-              }
-
-              void key(String k) {
-                  if (k == null) return;
-                  if (k.equals("back")) performGlobalAction(GLOBAL_ACTION_BACK);
-                  else if (k.equals("home")) performGlobalAction(GLOBAL_ACTION_HOME);
-                  else if (k.equals("recents")) performGlobalAction(GLOBAL_ACTION_RECENTS);
-              }
-          }
-          EOF
-
-          cat > app/src/main/assets/index.html <<'EOF'
-          <!doctype html>
-          <html>
+      - name: App-Oberfläche (HTML) erzeugen
+        run: |
+          cat > app/src/main/assets/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html lang="de">
           <head>
           <meta charset="utf-8">
-          <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
-          <title>Mirror</title>
+          <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+          <title>Marktkasse</title>
           <style>
-          html,body{margin:0;height:100%;background:#000;overflow:hidden}
-          body{display:flex;flex-direction:column;align-items:center;justify-content:center}
-          img{max-width:100vw;max-height:calc(100vh - 64px);touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
-          #bar{display:flex;gap:12px;height:64px;align-items:center}
-          button{font-size:18px;padding:10px 22px;border-radius:12px;border:0;background:#333;color:#fff}
+          :root{--text:#f4f7f5;--muted:rgba(244,247,245,.58);--gold:#ffd27a;--red:#ff5d73;--green:#5be3a1;--blue:#7ab8ff}
+          *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+          html,body{min-height:100%}
+          body{font-family:system-ui,-apple-system,Roboto,"Segoe UI",sans-serif;color:var(--text);background:#07120d;overflow-x:hidden;-webkit-font-smoothing:antialiased;user-select:none;-webkit-user-select:none;padding:14px 14px 120px}
+          body[data-tab="kasse"]{padding-bottom:200px}
+          button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
+          input,textarea{user-select:text;-webkit-user-select:text}
+          .bg{position:fixed;inset:0;z-index:-1;overflow:hidden;background:radial-gradient(120% 80% at 10% 0%,#123a2a 0%,transparent 60%),radial-gradient(100% 70% at 100% 100%,#3a0f1d 0%,transparent 60%),#07120d}
+          .bg i{position:absolute;border-radius:50%;filter:blur(55px);opacity:.5;animation:float 20s ease-in-out infinite alternate}
+          .b1{width:320px;height:320px;background:#1f8a5b;top:-90px;left:-70px}
+          .b2{width:290px;height:290px;background:#b3243f;bottom:60px;right:-100px;animation-delay:-7s!important}
+          .b3{width:200px;height:200px;background:#d9a441;top:42%;left:25%;opacity:.25!important;animation-delay:-13s!important}
+          @keyframes float{to{transform:translate(40px,60px) scale(1.15)}}
+
+          .glass{position:relative;background:linear-gradient(145deg,rgba(255,255,255,.13),rgba(255,255,255,.035) 60%,rgba(255,255,255,.07));backdrop-filter:blur(22px) saturate(170%);-webkit-backdrop-filter:blur(22px) saturate(170%);border:1px solid rgba(255,255,255,.14);box-shadow:inset 0 1px 0 rgba(255,255,255,.3),inset 0 -1px 0 rgba(255,255,255,.04),inset 1px 0 0 rgba(255,255,255,.06),0 14px 34px -10px rgba(0,0,0,.55);border-radius:26px}
+          .glass::after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;background:radial-gradient(120% 60% at 15% 0%,rgba(255,255,255,.16),transparent 45%)}
+
+          .top{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;margin:6px 4px 18px}
+          .eyebrow{font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--muted);font-weight:700}
+          h1{font-size:34px;font-weight:800;letter-spacing:-.02em;line-height:1.1}
+          .pill{padding:10px 14px;border-radius:999px;font-size:12px;color:var(--muted);white-space:nowrap}
+          .pill b{color:var(--text);margin-left:5px;font-size:15px;font-variant-numeric:tabular-nums}
+
+          .view{display:none}
+          .view.active{display:block;animation:in .35s ease}
+          @keyframes in{from{opacity:0;transform:translateY(8px)}}
+
+          .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+          @media(min-width:600px){.grid{grid-template-columns:repeat(3,1fr)}}
+          .tile{display:flex;flex-direction:column;align-items:flex-start;padding:16px;min-height:136px;text-align:left;overflow:hidden;transition:transform .2s cubic-bezier(.3,1.6,.5,1)}
+          .tile:active{transform:scale(.95)}
+          .tile::before{content:"";position:absolute;width:100px;height:100px;border-radius:50%;background:var(--c,#fff);filter:blur(32px);opacity:.38;top:-28px;right:-28px;pointer-events:none}
+          .emo{font-size:34px;line-height:1;margin-bottom:auto;filter:drop-shadow(0 4px 10px rgba(0,0,0,.35))}
+          .nm{font-weight:700;font-size:16px;margin-top:14px;line-height:1.2}
+          .pr{color:var(--muted);font-size:14px;font-variant-numeric:tabular-nums;margin-top:2px}
+          .badge{position:absolute;top:12px;right:12px;min-width:30px;height:30px;padding:0 9px;border-radius:999px;display:grid;place-items:center;font-weight:800;font-size:15px;background:var(--c);color:#0b1a14;transform:scale(0);box-shadow:0 4px 14px -2px var(--c),inset 0 1px 0 rgba(255,255,255,.6);z-index:2}
+          .badge.on{transform:scale(1)}
+          .tile.pop{animation:pop .4s cubic-bezier(.3,1.6,.5,1)}
+          .tile.pop .badge{animation:bpop .4s cubic-bezier(.3,1.8,.5,1)}
+          @keyframes pop{35%{transform:scale(.94)}}
+          @keyframes bpop{0%{transform:scale(.4)}}
+          .tile.ghost{border-style:dashed;background:rgba(255,255,255,.025)}
+          .tile.ghost .emo{font-size:30px;color:var(--muted)}
+
+          .cartbar{position:fixed;left:12px;right:12px;bottom:90px;display:flex;align-items:center;gap:8px;padding:8px;border-radius:26px;z-index:20;transition:transform .4s cubic-bezier(.3,1.3,.5,1),opacity .3s}
+          body:not([data-tab="kasse"]) .cartbar{transform:translateY(40px);opacity:0;pointer-events:none}
+          .cart-info{flex:1;min-width:0;text-align:left;padding:4px 10px}
+          .ct-n{font-size:12px;color:var(--muted);font-weight:600}
+          .ct-t{font-size:25px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+          .ct-hint{font-size:15px;font-weight:600}
+          .btn{padding:14px 18px;border-radius:18px;font-weight:700;font-size:15px;background:linear-gradient(180deg,rgba(255,255,255,.96),rgba(226,238,232,.88));color:#0b1a14;box-shadow:inset 0 1px 0 #fff,0 8px 20px -8px rgba(0,0,0,.6);transition:transform .15s,opacity .2s}
+          .btn:active{transform:scale(.95)}
+          .pay{padding:16px 18px}
+          .pay.bar{background:linear-gradient(180deg,#8ef5c3,#3fcf8a)}
+          .pay.card{background:linear-gradient(180deg,#b6d6ff,#6aa4ff)}
+          .cartbar.empty .pay{opacity:.3;pointer-events:none}
+          .btn.ghost{background:rgba(255,255,255,.08);color:var(--text);box-shadow:inset 0 1px 0 rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.12)}
+          .btn.danger{background:linear-gradient(180deg,#ff9aa7,#ff5d73)}
+          .btn.ok{background:linear-gradient(180deg,#8ef5c3,#3fcf8a)}
+          .btn.small{padding:8px 13px;font-size:13px;border-radius:13px}
+
+          .tabbar{position:fixed;left:12px;right:12px;bottom:12px;height:66px;display:grid;grid-template-columns:repeat(4,1fr);padding:6px;border-radius:33px;z-index:21}
+          .lens{position:absolute;top:6px;bottom:6px;left:6px;width:calc((100% - 12px)/4);border-radius:27px;background:linear-gradient(180deg,rgba(255,255,255,.2),rgba(255,255,255,.08));box-shadow:inset 0 1px 0 rgba(255,255,255,.45),inset 0 0 0 1px rgba(255,255,255,.1),0 6px 16px rgba(0,0,0,.3);transition:transform .55s cubic-bezier(.34,1.45,.5,1)}
+          .tabbar button{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:11px;font-weight:700;color:var(--muted);transition:color .3s}
+          .tabbar button.active{color:var(--text)}
+          .tabbar svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+
+          .scrim{position:fixed;inset:0;background:rgba(0,0,0,.5);opacity:0;pointer-events:none;transition:opacity .3s;z-index:30}
+          .sheet{position:fixed;left:8px;right:8px;bottom:8px;max-height:88vh;overflow:auto;padding:10px 18px 22px;border-radius:32px;z-index:31;transform:translateY(115%);visibility:hidden;transition:transform .5s cubic-bezier(.3,1.15,.5,1),visibility 0s .5s;background:linear-gradient(160deg,rgba(44,66,57,.82),rgba(18,28,24,.9))}
+          .sheet-open .scrim{opacity:1;pointer-events:auto}
+          .sheet-open .sheet{transform:none;visibility:visible;transition:transform .5s cubic-bezier(.3,1.15,.5,1),visibility 0s}
+          .grab{width:40px;height:5px;border-radius:9px;background:rgba(255,255,255,.3);margin:0 auto 14px}
+          .sheet h2{font-size:22px;margin-bottom:12px;letter-spacing:-.01em}
+
+          .field{display:block;margin:12px 0}
+          .field>span{display:block;font-size:12px;color:var(--muted);margin:0 0 7px 4px;font-weight:700;letter-spacing:.04em}
+          .field input,.field textarea{width:100%;padding:14px 16px;border-radius:16px;border:1px solid rgba(255,255,255,.14);background:rgba(0,0,0,.28);color:var(--text);font:inherit;font-size:17px;outline:none;box-shadow:inset 0 2px 6px rgba(0,0,0,.3)}
+          .field textarea{font-size:12px;height:140px;resize:none}
+          .field input:focus,.field textarea:focus{border-color:rgba(255,210,122,.6)}
+          .btns{display:flex;gap:10px;margin-top:18px}
+          .btns .btn{flex:1}
+
+          .row{display:flex;align-items:center;gap:12px;padding:12px 4px;border-bottom:1px solid rgba(255,255,255,.07);width:100%;text-align:left;font-size:15px}
+          .row:last-child{border-bottom:0}
+          .grow{flex:1;min-width:0}
+          .sub{display:block;margin-top:2px}
+          .muted{color:var(--muted);font-size:13px}
+          .center{text-align:center}
+          .emo-s{font-size:24px;width:34px;text-align:center;flex:none}
+          .chev{color:var(--muted);font-size:22px;line-height:1}
+          .ib{width:38px;height:38px;border-radius:13px;background:rgba(255,255,255,.1);font-size:20px;font-weight:700;box-shadow:inset 0 1px 0 rgba(255,255,255,.2);flex:none}
+          .q{min-width:24px;text-align:center;font-variant-numeric:tabular-nums}
+          .sumrow{display:flex;justify-content:space-between;align-items:baseline;padding:14px 4px 0;font-size:15px;color:var(--muted)}
+          .sumrow b{font-size:26px;color:var(--text);font-variant-numeric:tabular-nums}
+          .danger-row{color:#ff8a9a}
+
+          .chips{display:flex;gap:8px;overflow-x:auto;padding:2px 2px 14px;scrollbar-width:none}
+          .chips::-webkit-scrollbar{display:none}
+          .chip{flex:none;padding:9px 15px;border-radius:999px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);font-size:14px;font-weight:700;color:var(--muted);white-space:nowrap;box-shadow:inset 0 1px 0 rgba(255,255,255,.12)}
+          .chip.on{background:rgba(255,255,255,.92);color:#0b1a14}
+          .card{padding:18px;margin-bottom:12px}
+          .hero{padding:22px;margin-bottom:12px;overflow:hidden}
+          .hero::before{content:"";position:absolute;width:240px;height:240px;right:-70px;top:-90px;background:radial-gradient(circle,#ffd27a,transparent 65%);opacity:.32;pointer-events:none}
+          .hero-num{font-size:46px;font-weight:800;letter-spacing:-.03em;margin:4px 0 16px;font-variant-numeric:tabular-nums;background:linear-gradient(180deg,#fff,#ffe2a3);-webkit-background-clip:text;background-clip:text;color:transparent}
+          .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+          .kpis div{padding:10px 12px;border-radius:16px;background:rgba(255,255,255,.06);box-shadow:inset 0 1px 0 rgba(255,255,255,.08)}
+          .kpis b{display:block;font-size:17px;font-variant-numeric:tabular-nums}
+          .kpis span{font-size:11px;color:var(--muted);font-weight:600}
+          .two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+          .num{font-size:24px;font-weight:800;margin:6px 0 10px;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+          .meter{height:6px;border-radius:9px;background:rgba(255,255,255,.08);overflow:hidden}
+          .meter i{display:block;height:100%;border-radius:9px;background:var(--c)}
+          .card-h{display:flex;justify-content:space-between;align-items:center;font-weight:800;font-size:16px;margin-bottom:6px}
+          .rank{width:20px;color:var(--muted);font-weight:800;flex:none}
+          .tbar{height:5px;border-radius:9px;background:rgba(255,255,255,.08);margin-top:7px;overflow:hidden}
+          .tbar i{display:block;height:100%;background:var(--c,#ffd27a);border-radius:9px}
+          .hours{display:flex;align-items:flex-end;gap:5px;height:140px;padding-top:10px}
+          .hours .h{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;gap:6px}
+          .hours .h i{width:100%;border-radius:8px 8px 4px 4px;background:linear-gradient(180deg,#ffd27a,rgba(255,210,122,.2));min-height:3px;box-shadow:inset 0 1px 0 rgba(255,255,255,.5)}
+          .hours .h span{font-size:10px;color:var(--muted);font-weight:600}
+          .cash{display:flex;align-items:center;justify-content:space-between;gap:10px}
+          .empty-state{text-align:center;padding:60px 20px;color:var(--muted);line-height:1.5}
+          .empty-state div{font-size:52px;margin-bottom:12px}
+          .dayh{display:flex;justify-content:space-between;margin:18px 8px 8px;font-size:12px;color:var(--muted);font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+          .dayh:first-child{margin-top:0}
+          .list{padding:4px 14px}
+          .tag{font-size:11px;padding:3px 8px;border-radius:999px;background:rgba(91,227,161,.15);color:var(--green);font-weight:700;margin-left:6px}
+          .tag.karte{background:rgba(122,184,255,.15);color:var(--blue)}
+          .time{font-variant-numeric:tabular-nums;font-weight:700;width:46px;flex:none}
+          .ellip{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+          .bigsum{text-align:center;font-size:46px;font-weight:800;margin:2px 0 10px;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+          .quick{justify-content:center;flex-wrap:wrap;padding:10px 0 2px}
+          .change{display:flex;justify-content:space-between;align-items:center;padding:16px 18px;border-radius:18px;background:rgba(255,255,255,.06);margin-top:8px;box-shadow:inset 0 1px 0 rgba(255,255,255,.08)}
+          .change span{color:var(--muted);font-weight:700}
+          .change b{font-size:30px;font-variant-numeric:tabular-nums}
+          .change.pos b{color:var(--green)}
+          .change.neg b{color:var(--red)}
+          .seg{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:4px;border-radius:17px;background:rgba(0,0,0,.28);margin-top:16px}
+          .seg button{padding:11px;border-radius:13px;font-weight:700;color:var(--muted)}
+          .seg button.on{background:rgba(255,255,255,.92);color:#0b1a14}
+          .emojis{display:flex;flex-wrap:wrap;gap:6px}
+          .em{width:42px;height:42px;border-radius:13px;font-size:22px;background:rgba(255,255,255,.06)}
+          .em.on{background:rgba(255,255,255,.25);box-shadow:inset 0 0 0 2px rgba(255,255,255,.7)}
+          .colors{display:flex;gap:11px;flex-wrap:wrap;padding-left:4px}
+          .sw{width:34px;height:34px;border-radius:50%;background:var(--c);box-shadow:inset 0 1px 0 rgba(255,255,255,.5),0 4px 12px -4px var(--c)}
+          .sw.on{outline:3px solid #fff;outline-offset:3px}
+          .foot{margin:18px 10px 0;line-height:1.5}
+
+          .toast{position:fixed;left:50%;top:14px;transform:translate(-50%,-160%);display:flex;align-items:center;gap:14px;padding:10px 10px 10px 18px;min-height:48px;border-radius:999px;z-index:40;transition:transform .5s cubic-bezier(.3,1.4,.5,1);white-space:nowrap;font-weight:700;font-size:14px;background:linear-gradient(145deg,rgba(44,66,57,.9),rgba(18,28,24,.92))}
+          .toast.show{transform:translate(-50%,0)}
+          .toast button{padding:8px 13px;border-radius:999px;background:rgba(255,255,255,.92);color:#0b1a14;font-weight:800;font-size:13px}
           </style>
           </head>
-          <body>
-          <img id="s" src="/stream" draggable="false">
-          <div id="bar">
-          <button data-k="back">Zurück</button>
-          <button data-k="home">Home</button>
-          <button data-k="recents">Übersicht</button>
+          <body data-tab="kasse">
+          <div class="bg"><i class="b1"></i><i class="b2"></i><i class="b3"></i></div>
+
+          <header class="top">
+            <div>
+              <div class="eyebrow" id="evName">Weihnachtsmarkt</div>
+              <h1 id="title">Kasse</h1>
+            </div>
+            <div class="pill glass">Heute<b id="todaySum">0,00 €</b></div>
+          </header>
+
+          <main>
+            <section id="v-kasse" class="view active"><div class="grid" id="grid"></div></section>
+            <section id="v-stats" class="view"><div class="chips" id="dayChips"></div><div id="stats"></div></section>
+            <section id="v-history" class="view"><div id="history"></div></section>
+            <section id="v-settings" class="view"><div id="settings"></div></section>
+          </main>
+
+          <div class="cartbar glass empty" id="cartbar">
+            <button class="cart-info" id="cartInfo"></button>
+            <button class="btn pay bar" id="payBar">💶 Bar</button>
+            <button class="btn pay card" id="payCard">💳 Karte</button>
           </div>
+
+          <nav class="tabbar glass" id="tabbar">
+            <div class="lens" id="lens"></div>
+            <button data-tab="kasse" class="active"><svg viewBox="0 0 24 24"><path d="M5 8h14l-1.2 12H6.2L5 8z"/><path d="M9 8V6.5a3 3 0 0 1 6 0V8"/></svg>Kasse</button>
+            <button data-tab="stats"><svg viewBox="0 0 24 24"><path d="M5 20v-8M11 20V5M17 20v-11M3 20h18"/></svg>Übersicht</button>
+            <button data-tab="history"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>Verlauf</button>
+            <button data-tab="settings"><svg viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 12h3M11 12h9M4 17h11M19 17h1"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="17" r="2"/></svg>Mehr</button>
+          </nav>
+
+          <div class="scrim" id="scrim"></div>
+          <div class="sheet glass" id="sheet"><div class="grab"></div><div id="sheetBody"></div></div>
+          <div class="toast glass" id="toast"></div>
+
           <script>
-          var img = document.getElementById('s'), d = null;
-          function pos(e) {
-            var r = img.getBoundingClientRect();
-            return {x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height};
+          const $ = s => document.querySelector(s);
+          const $$ = s => Array.from(document.querySelectorAll(s));
+          const KEY = 'marktkasse_v1';
+          const EUR = new Intl.NumberFormat('de-DE', {style: 'currency', currency: 'EUR'});
+          const fmt = c => EUR.format((c || 0) / 100);
+          const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+          const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+          const pad = n => String(n).padStart(2, '0');
+          const dayKey = ts => { const d = new Date(ts); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); };
+          const todayKey = () => dayKey(Date.now());
+          const dLabel = k => { const p = k.split('-').map(Number); return new Date(p[0], p[1] - 1, p[2]).toLocaleDateString('de-DE', {weekday: 'short', day: 'numeric', month: 'short'}); };
+          const tLabel = ts => { const d = new Date(ts); return pad(d.getHours()) + ':' + pad(d.getMinutes()); };
+          const money2 = c => (c / 100).toFixed(2).replace('.', ',');
+          const parseMoney = s => { const v = parseFloat(String(s).replace(/[\s€]/g, '').replace(',', '.')); return isNaN(v) ? NaN : Math.round(v * 100); };
+
+          const COLORS = ['#ff5d73', '#5be3a1', '#ffd27a', '#7ab8ff', '#c79bff', '#ff9f5a', '#5ee0e6', '#ff7ac6'];
+          const EMOJIS = ['⭐', '❄️', '🎄', '🦌', '🎁', '✨', '🔔', '⛄', '🎅', '🍪', '❤️', '🌟', '🕯️', '🐱', '🐶', '🦊', '🔑', '🏷️'];
+          const DEFAULTS = [
+            {name: 'Stern', price: 500, emoji: '⭐'},
+            {name: 'Schneeflocke', price: 500, emoji: '❄️'},
+            {name: 'Tannenbaum', price: 600, emoji: '🎄'},
+            {name: 'Rentier', price: 700, emoji: '🦌'},
+            {name: 'Geschenk', price: 400, emoji: '🎁'},
+            {name: 'Namensanhänger', price: 800, emoji: '✨'}
+          ];
+          const fresh = () => ({
+            products: DEFAULTS.map((p, i) => Object.assign({id: uid() + i, color: COLORS[i % COLORS.length]}, p)),
+            sales: [], startCash: 0, eventName: 'Weihnachtsmarkt'
+          });
+
+          let db = null;
+          try { db = JSON.parse(localStorage.getItem(KEY)); } catch (e) {}
+          if (!db || !Array.isArray(db.products) || !Array.isArray(db.sales)) db = fresh();
+          function save() {
+            try { localStorage.setItem(KEY, JSON.stringify(db)); }
+            catch (e) { toast('⚠️ Speichern fehlgeschlagen!'); }
           }
-          function send(u) { fetch(u).catch(function () {}); }
-          img.addEventListener('pointerdown', function (e) {
-            e.preventDefault();
-            img.setPointerCapture(e.pointerId);
-            d = {p: pos(e), cx: e.clientX, cy: e.clientY, t: Date.now()};
+
+          function haptic() { try { if (window.Android && Android.haptic) Android.haptic(); else if (navigator.vibrate) navigator.vibrate(8); } catch (e) {} }
+          function shareText(text, title) {
+            haptic();
+            if (window.Android && Android.share) { Android.share(text, title); return; }
+            if (navigator.share) { navigator.share({title: title, text: text}).catch(() => {}); return; }
+            if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => toast('In Zwischenablage kopiert'));
+          }
+
+          /* ---------- Toast ---------- */
+          let toastTimer;
+          function toast(msg, actLabel, act) {
+            const t = $('#toast');
+            t.innerHTML = '<span>' + msg + '</span>' + (actLabel ? '<button id="toastAct">' + actLabel + '</button>' : '');
+            t.classList.add('show');
+            if (actLabel) $('#toastAct').onclick = () => { t.classList.remove('show'); act(); };
+            clearTimeout(toastTimer);
+            toastTimer = setTimeout(() => t.classList.remove('show'), actLabel ? 5000 : 2200);
+          }
+
+          /* ---------- Sheet ---------- */
+          let sheet = null;
+          function openSheet(render, click) { sheet = {render: render, click: click}; $('#sheetBody').innerHTML = render(); $('#sheet').scrollTop = 0; document.body.classList.add('sheet-open'); }
+          function refreshSheet() { if (sheet) $('#sheetBody').innerHTML = sheet.render(); }
+          function closeSheet() { document.body.classList.remove('sheet-open'); sheet = null; if (document.activeElement) document.activeElement.blur(); }
+          $('#sheetBody').addEventListener('click', e => { const b = e.target.closest('button'); if (b && sheet && sheet.click) sheet.click(b, e); });
+          $('#scrim').onclick = closeSheet;
+          function arm(b, target) {
+            target = target || b;
+            if (b.dataset.armed) return true;
+            b.dataset.armed = '1';
+            const old = target.textContent;
+            target.textContent = 'Sicher? Nochmal tippen';
+            setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; target.textContent = old; } }, 3000);
+            return false;
+          }
+          function promptSheet(title, label, val, mode, onSave) {
+            openSheet(() => '<h2>' + title + '</h2><label class="field"><span>' + label + '</span><input id="pIn" inputmode="' + mode + '" value="' + esc(val) + '"></label>' +
+              '<div class="btns"><button class="btn ghost" data-act="close">Abbrechen</button><button class="btn" data-act="ok">Speichern</button></div>',
+              b => {
+                if (b.dataset.act === 'close') closeSheet();
+                if (b.dataset.act === 'ok' && onSave($('#pIn').value) !== false) { save(); closeSheet(); renderAll(); toast('Gespeichert ✓'); }
+              });
+            setTimeout(() => { const i = $('#pIn'); if (i) i.focus(); }, 350);
+          }
+
+          /* ---------- Warenkorb ---------- */
+          let cart = {};
+          let customItems = [];
+          function cartLines() {
+            const lines = [];
+            db.products.forEach(p => { const q = cart[p.id]; if (q > 0) lines.push({pid: p.id, name: p.name, emoji: p.emoji, price: p.price, qty: q}); });
+            customItems.forEach((c, i) => lines.push({pid: 'custom', ci: i, name: c.name, emoji: '💶', price: c.price, qty: 1}));
+            return lines;
+          }
+          const cartTotal = () => cartLines().reduce((s, l) => s + l.price * l.qty, 0);
+          const cartCount = () => cartLines().reduce((s, l) => s + l.qty, 0);
+
+          function renderGrid(popId) {
+            $('#grid').innerHTML = db.products.map(p =>
+              '<button class="tile glass' + (p.id === popId ? ' pop' : '') + '" data-pid="' + p.id + '" style="--c:' + p.color + '">' +
+              '<span class="badge' + (cart[p.id] ? ' on' : '') + '">' + (cart[p.id] || '') + '</span>' +
+              '<span class="emo">' + esc(p.emoji) + '</span><span class="nm">' + esc(p.name) + '</span><span class="pr">' + fmt(p.price) + '</span></button>'
+            ).join('') +
+            '<button class="tile glass ghost" data-act="custom"><span class="emo">＋</span><span class="nm">Freier Betrag</span><span class="pr">Sonstiges</span></button>';
+          }
+          function renderCart() {
+            const n = cartCount();
+            $('#cartbar').classList.toggle('empty', n === 0);
+            $('#cartInfo').innerHTML = n
+              ? '<div class="ct-n">' + n + ' Artikel · antippen zum Bearbeiten</div><div class="ct-t">' + fmt(cartTotal()) + '</div>'
+              : '<div class="ct-n">Warenkorb leer</div><div class="ct-hint">Produkt antippen 👆</div>';
+          }
+          $('#grid').addEventListener('click', e => {
+            const b = e.target.closest('button'); if (!b) return;
+            if (b.dataset.act === 'custom') return openCustom();
+            const id = b.dataset.pid;
+            cart[id] = (cart[id] || 0) + 1;
+            haptic(); renderGrid(id); renderCart();
           });
-          img.addEventListener('pointerup', function (e) {
-            if (!d) return;
-            var p = pos(e);
-            var dist = Math.hypot(e.clientX - d.cx, e.clientY - d.cy);
-            var el = Date.now() - d.t;
-            if (dist < 12) {
-              send('/tap?x=' + d.p.x + '&y=' + d.p.y + '&ms=' + (el > 500 ? 700 : 50));
-            } else {
-              var ms = Math.min(Math.max(el, 100), 1000);
-              send('/swipe?x1=' + d.p.x + '&y1=' + d.p.y + '&x2=' + p.x + '&y2=' + p.y + '&ms=' + ms);
+          $('#cartInfo').onclick = openCart;
+          $('#payBar').onclick = openBar;
+          $('#payCard').onclick = () => checkout('karte');
+
+          function openCart() {
+            if (!cartCount()) return;
+            openSheet(() => {
+              const ls = cartLines();
+              return '<h2>Warenkorb</h2>' + ls.map(l =>
+                '<div class="row"><span class="emo-s">' + esc(l.emoji) + '</span><span class="grow">' + esc(l.name) + '<span class="muted sub">' + fmt(l.price) + '</span></span>' +
+                (l.pid === 'custom'
+                  ? '<button class="ib" data-ci="' + l.ci + '" data-d="-1">✕</button>'
+                  : '<button class="ib" data-pid="' + l.pid + '" data-d="-1">−</button><b class="q">' + l.qty + '</b><button class="ib" data-pid="' + l.pid + '" data-d="1">+</button>') +
+                '</div>').join('') +
+                '<div class="sumrow"><span>Summe</span><b>' + fmt(cartTotal()) + '</b></div>' +
+                '<div class="btns"><button class="btn ghost" data-act="clear">Leeren</button><button class="btn" data-act="close">Fertig</button></div>';
+            }, b => {
+              const a = b.dataset.act;
+              if (a === 'clear') { cart = {}; customItems = []; closeSheet(); }
+              else if (a === 'close') closeSheet();
+              else if (b.dataset.d) {
+                if (b.dataset.ci !== undefined) customItems.splice(+b.dataset.ci, 1);
+                else cart[b.dataset.pid] = Math.max(0, (cart[b.dataset.pid] || 0) + Number(b.dataset.d));
+                haptic();
+                if (!cartCount()) closeSheet(); else refreshSheet();
+              }
+              renderGrid(); renderCart();
+            });
+          }
+          function openCustom() {
+            openSheet(() => '<h2>Freier Betrag</h2>' +
+              '<label class="field"><span>Betrag (€)</span><input id="cAmt" inputmode="decimal" placeholder="0,00"></label>' +
+              '<label class="field"><span>Bezeichnung (optional)</span><input id="cName" placeholder="z. B. Sonderanfertigung"></label>' +
+              '<div class="btns"><button class="btn ghost" data-act="close">Abbrechen</button><button class="btn" data-act="add">Hinzufügen</button></div>',
+              b => {
+                if (b.dataset.act === 'close') closeSheet();
+                if (b.dataset.act === 'add') {
+                  const c = parseMoney($('#cAmt').value);
+                  if (!(c > 0)) { toast('Bitte Betrag eingeben'); return; }
+                  customItems.push({name: $('#cName').value.trim() || 'Sonstiges', price: c});
+                  closeSheet(); haptic(); renderCart();
+                }
+              });
+            setTimeout(() => $('#cAmt').focus(), 350);
+          }
+          function openBar() {
+            const t = cartTotal(); if (!cartCount()) return;
+            let given = null;
+            const opts = Array.from(new Set([t, Math.ceil(t / 500) * 500, Math.ceil(t / 1000) * 1000, 2000, 5000, 10000]))
+              .filter(v => v >= t).sort((a, b) => a - b).slice(0, 5);
+            const showChange = () => {
+              const el = $('#chg'); if (!el) return;
+              if (given == null || isNaN(given)) { el.className = 'change'; el.innerHTML = '<span>Rückgeld</span><b>–</b>'; return; }
+              const r = given - t;
+              el.className = 'change ' + (r < 0 ? 'neg' : 'pos');
+              el.innerHTML = r < 0 ? '<span>Es fehlen</span><b>' + fmt(-r) + '</b>' : '<span>Rückgeld</span><b>' + fmt(r) + '</b>';
+            };
+            openSheet(() => '<h2>Barzahlung</h2><div class="bigsum">' + fmt(t) + '</div><div class="muted center">Kunde gibt …</div>' +
+              '<div class="chips quick">' + opts.map(v => '<button class="chip" data-g="' + v + '">' + (v === t ? 'Passend' : fmt(v)) + '</button>').join('') + '</div>' +
+              '<label class="field"><span>Anderer Betrag</span><input id="gIn" inputmode="decimal" placeholder="0,00"></label>' +
+              '<div class="change" id="chg"><span>Rückgeld</span><b>–</b></div>' +
+              '<div class="btns"><button class="btn ghost" data-act="close">Zurück</button><button class="btn ok" data-act="done">✓ Verkauf speichern</button></div>',
+              b => {
+                if (b.dataset.g) {
+                  given = Number(b.dataset.g); $('#gIn').value = '';
+                  $$('.quick .chip').forEach(c => c.classList.toggle('on', c === b));
+                  haptic(); showChange();
+                } else if (b.dataset.act === 'close') closeSheet();
+                else if (b.dataset.act === 'done') checkout('bar');
+              });
+            $('#gIn').addEventListener('input', e => { given = parseMoney(e.target.value); $$('.quick .chip').forEach(c => c.classList.remove('on')); showChange(); });
+          }
+          function checkout(pay) {
+            const lines = cartLines(); if (!lines.length) return;
+            const sale = {id: uid(), t: Date.now(), pay: pay,
+              items: lines.map(l => ({pid: l.pid, name: l.name, emoji: l.emoji, price: l.price, qty: l.qty})), total: cartTotal()};
+            db.sales.push(sale); save();
+            cart = {}; customItems = [];
+            closeSheet(); haptic(); renderAll();
+            toast((pay === 'bar' ? '💶 ' : '💳 ') + fmt(sale.total) + ' gespeichert', 'Rückgängig', () => {
+              db.sales = db.sales.filter(s => s.id !== sale.id); save();
+              sale.items.forEach(it => {
+                if (it.pid === 'custom') customItems.push({name: it.name, price: it.price});
+                else if (db.products.some(p => p.id === it.pid)) cart[it.pid] = (cart[it.pid] || 0) + it.qty;
+              });
+              renderAll(); toast('Verkauf zurück im Warenkorb');
+            });
+          }
+
+          /* ---------- Auswertung ---------- */
+          let statDay = 'today';
+          function salesFor(day) {
+            if (day === 'all') return db.sales;
+            const k = day === 'today' ? todayKey() : day;
+            return db.sales.filter(s => dayKey(s.t) === k);
+          }
+          function agg(S) {
+            const r = {total: 0, n: S.length, items: 0, bar: 0, card: 0, top: [], hours: new Array(24).fill(0)};
+            const map = {};
+            S.forEach(s => {
+              r.total += s.total;
+              if (s.pay === 'bar') r.bar += s.total; else r.card += s.total;
+              r.hours[new Date(s.t).getHours()] += s.total;
+              s.items.forEach(it => {
+                r.items += it.qty;
+                const k = it.pid === 'custom' ? 'c:' + it.name : it.pid;
+                const p = db.products.find(x => x.id === it.pid);
+                if (!map[k]) map[k] = {name: p ? p.name : it.name, emoji: p ? p.emoji : it.emoji, color: p ? p.color : '#ffd27a', qty: 0, rev: 0};
+                map[k].qty += it.qty; map[k].rev += it.price * it.qty;
+              });
+            });
+            r.top = Object.values(map).sort((a, b) => b.rev - a.rev);
+            return r;
+          }
+          function dayName(day) { return day === 'all' ? 'Gesamt' : day === 'today' ? 'Heute' : dLabel(day); }
+          function renderStats() {
+            const tk = todayKey();
+            const days = Array.from(new Set(db.sales.map(s => dayKey(s.t)))).filter(k => k !== tk).sort().reverse();
+            const chips = [['today', 'Heute']].concat(days.map(d => [d, dLabel(d)]), [['all', 'Gesamt']]);
+            $('#dayChips').innerHTML = chips.map(c => '<button class="chip' + (statDay === c[0] ? ' on' : '') + '" data-day="' + c[0] + '">' + c[1] + '</button>').join('');
+            const S = salesFor(statDay);
+            const a = agg(S);
+            if (!S.length) {
+              $('#stats').innerHTML = '<div class="empty-state"><div>🎄</div>Noch keine Verkäufe ' + (statDay === 'all' ? '' : 'an diesem Tag') + '.<br>Los geht\'s an der Kasse!</div>';
+              return;
             }
-            d = null;
+            const pct = v => a.total ? Math.round(v / a.total * 100) : 0;
+            const maxTop = a.top.length ? a.top[0].rev : 1;
+            const used = a.hours.map((v, i) => v ? i : -1).filter(i => i >= 0);
+            let lo = used[0], hi = used[used.length - 1];
+            while (hi - lo < 5) { if (lo > 0) lo--; if (hi - lo < 5 && hi < 23) hi++; }
+            const maxH = Math.max.apply(null, a.hours);
+            let hoursHtml = '';
+            for (let h = lo; h <= hi; h++) hoursHtml += '<div class="h"><i style="height:' + Math.max(2, Math.round(a.hours[h] / maxH * 82)) + '%"></i><span>' + h + '</span></div>';
+            const single = statDay !== 'all';
+            $('#stats').innerHTML =
+              '<div class="hero glass"><div class="eyebrow">Umsatz · ' + dayName(statDay) + '</div><div class="hero-num">' + fmt(a.total) + '</div>' +
+              '<div class="kpis"><div><b>' + a.n + '</b><span>Verkäufe</span></div><div><b>' + a.items + '</b><span>Anhänger</span></div><div><b>' + fmt(a.n ? Math.round(a.total / a.n) : 0) + '</b><span>Ø pro Kunde</span></div></div></div>' +
+              '<div class="two"><div class="glass card"><div class="eyebrow">💶 Bar · ' + pct(a.bar) + '%</div><div class="num">' + fmt(a.bar) + '</div><div class="meter" style="--c:var(--green)"><i style="width:' + pct(a.bar) + '%"></i></div></div>' +
+              '<div class="glass card"><div class="eyebrow">💳 Karte · ' + pct(a.card) + '%</div><div class="num">' + fmt(a.card) + '</div><div class="meter" style="--c:var(--blue)"><i style="width:' + pct(a.card) + '%"></i></div></div></div>' +
+              (single ? '<div class="glass card cash"><div><div class="eyebrow">Soll in der Kasse</div><div class="num">' + fmt(db.startCash + a.bar) + '</div><div class="muted">' + fmt(db.startCash) + ' Wechselgeld + ' + fmt(a.bar) + ' bar</div></div><button class="btn small ghost" data-act="setcash">Wechselgeld</button></div>' : '') +
+              '<div class="glass card"><div class="card-h">Top-Produkte</div>' + a.top.map((p, i) =>
+                '<div class="row"><span class="rank">' + (i + 1) + '</span><span class="emo-s">' + esc(p.emoji) + '</span><span class="grow"><span class="ellip" style="display:block">' + esc(p.name) + ' <span class="muted">× ' + p.qty + '</span></span><span class="tbar" style="display:block;--c:' + p.color + '"><i style="width:' + Math.round(p.rev / maxTop * 100) + '%"></i></span></span><b>' + fmt(p.rev) + '</b></div>').join('') + '</div>' +
+              '<div class="glass card"><div class="card-h">Umsatz nach Uhrzeit</div><div class="hours">' + hoursHtml + '</div></div>' +
+              '<div class="btns" style="margin-top:4px"><button class="btn ghost" data-act="sharesum">📤 ' + (single ? 'Tagesabschluss' : 'Gesamtabschluss') + ' teilen</button></div>';
+          }
+          function summaryText(day) {
+            const a = agg(salesFor(day));
+            const lines = ['🎄 ' + db.eventName + ' – Abschluss ' + dayName(day) + (day === 'today' ? ' (' + dLabel(todayKey()) + ')' : ''), '',
+              'Umsatz: ' + fmt(a.total), 'Verkäufe: ' + a.n + ' · Artikel: ' + a.items,
+              'Bar: ' + fmt(a.bar) + ' · Karte: ' + fmt(a.card)];
+            if (day !== 'all') lines.push('Soll in der Kasse: ' + fmt(db.startCash + a.bar));
+            lines.push('', 'Produkte:');
+            a.top.forEach(p => lines.push('• ' + p.qty + '× ' + p.name + ': ' + fmt(p.rev)));
+            return lines.join('\n');
+          }
+          function editCash() {
+            promptSheet('Wechselgeld', 'Startbestand in der Kasse (€)', money2(db.startCash), 'decimal', v => {
+              const c = parseMoney(v); if (isNaN(c) || c < 0) { toast('Ungültiger Betrag'); return false; } db.startCash = c;
+            });
+          }
+          $('#v-stats').addEventListener('click', e => {
+            const b = e.target.closest('button'); if (!b) return;
+            if (b.dataset.day) { statDay = b.dataset.day; haptic(); renderStats(); }
+            if (b.dataset.act === 'setcash') editCash();
+            if (b.dataset.act === 'sharesum') shareText(summaryText(statDay), 'Marktkasse Abschluss');
           });
-          img.addEventListener('pointercancel', function () { d = null; });
-          document.querySelectorAll('button').forEach(function (b) {
-            b.onclick = function () { send('/key?k=' + b.dataset.k); };
+
+          /* ---------- Verlauf ---------- */
+          function renderHistory() {
+            if (!db.sales.length) { $('#history').innerHTML = '<div class="empty-state"><div>🧾</div>Hier erscheinen alle Verkäufe.</div>'; return; }
+            const groups = {};
+            db.sales.slice().sort((a, b) => b.t - a.t).forEach(s => { const k = dayKey(s.t); (groups[k] = groups[k] || []).push(s); });
+            $('#history').innerHTML = Object.keys(groups).sort().reverse().map(k => {
+              const g = groups[k];
+              return '<div class="dayh"><span>' + (k === todayKey() ? 'Heute' : dLabel(k)) + ' · ' + g.length + '</span><span>' + fmt(g.reduce((s, x) => s + x.total, 0)) + '</span></div>' +
+                '<div class="glass list">' + g.map(s =>
+                  '<button class="row" data-sale="' + s.id + '"><span class="time">' + tLabel(s.t) + '</span><span class="grow ellip">' +
+                  esc(s.items.map(it => it.qty + '× ' + it.name).join(', ')) + '</span><b>' + fmt(s.total) + '</b><span class="tag ' + s.pay + '">' + (s.pay === 'bar' ? 'Bar' : 'Karte') + '</span></button>').join('') + '</div>';
+            }).join('');
+          }
+          function openSale(id) {
+            const s = db.sales.find(x => x.id === id); if (!s) return;
+            openSheet(() => '<h2>Verkauf · ' + tLabel(s.t) + ' Uhr</h2><div class="muted" style="margin:-6px 0 8px">' + dLabel(dayKey(s.t)) + '</div>' +
+              s.items.map(it => '<div class="row"><span class="emo-s">' + esc(it.emoji || '•') + '</span><span class="grow">' + it.qty + '× ' + esc(it.name) + '<span class="muted sub">je ' + fmt(it.price) + '</span></span><b>' + fmt(it.price * it.qty) + '</b></div>').join('') +
+              '<div class="sumrow"><span>Summe</span><b>' + fmt(s.total) + '</b></div>' +
+              '<div class="seg"><button class="' + (s.pay === 'bar' ? 'on' : '') + '" data-pay="bar">💶 Bar</button><button class="' + (s.pay === 'karte' ? 'on' : '') + '" data-pay="karte">💳 Karte</button></div>' +
+              '<div class="btns"><button class="btn danger" data-act="del">Löschen</button><button class="btn" data-act="close">Fertig</button></div>',
+              b => {
+                if (b.dataset.pay) { s.pay = b.dataset.pay; save(); haptic(); refreshSheet(); renderAll(); }
+                else if (b.dataset.act === 'close') closeSheet();
+                else if (b.dataset.act === 'del') {
+                  if (!arm(b)) return;
+                  db.sales = db.sales.filter(x => x.id !== id); save(); closeSheet(); renderAll(); toast('Verkauf gelöscht');
+                }
+              });
+          }
+          $('#history').addEventListener('click', e => { const b = e.target.closest('[data-sale]'); if (b) openSale(b.dataset.sale); });
+
+          /* ---------- Einstellungen ---------- */
+          function renderSettings() {
+            const row = (act, icon, label, sub, cls) => '<button class="row ' + (cls || '') + '" data-act="' + act + '">' + (icon ? '<span class="emo-s">' + icon + '</span>' : '') +
+              '<span class="grow">' + label + (sub ? '<span class="muted sub">' + sub + '</span>' : '') + '</span><span class="chev">›</span></button>';
+            $('#settings').innerHTML =
+              '<div class="glass card"><div class="card-h">Produkte & Preise<button class="btn small" data-act="addprod">+ Neu</button></div>' +
+              (db.products.map(p => '<button class="row" data-edit="' + p.id + '"><span class="emo-s">' + esc(p.emoji) + '</span><span class="grow">' + esc(p.name) + '</span><b>' + fmt(p.price) + '</b><span class="chev">›</span></button>').join('') || '<div class="muted">Noch keine Produkte</div>') + '</div>' +
+              '<div class="glass card"><div class="card-h">Kasse</div>' +
+              row('evname', '📍', 'Name des Markts', esc(db.eventName)) +
+              row('setcash', '🪙', 'Wechselgeld (Startbestand)', fmt(db.startCash)) + '</div>' +
+              '<div class="glass card"><div class="card-h">Daten sichern</div>' +
+              row('csv', '📄', 'Alle Umsätze als CSV teilen', 'Für Excel / Google Sheets') +
+              row('backup', '💾', 'Backup teilen', 'Komplette Daten als Text') +
+              row('restore', '♻️', 'Backup einspielen', 'Backup-Text einfügen') +
+              row('reset', '🗑️', 'Alle Verkäufe löschen', '', 'danger-row') + '</div>' +
+              '<p class="muted center foot">Alle Daten bleiben nur auf diesem Handy.<br>Tipp: Abends „Backup teilen“ und euch selbst schicken.</p>';
+          }
+          function editProduct(id) {
+            const p = id ? db.products.find(x => x.id === id) : {name: '', price: 500, emoji: '⭐', color: COLORS[db.products.length % COLORS.length]};
+            if (!p) return;
+            let emoji = p.emoji, color = p.color;
+            const emojis = EMOJIS.indexOf(emoji) < 0 ? [emoji].concat(EMOJIS) : EMOJIS;
+            openSheet(() => '<h2>' + (id ? 'Produkt bearbeiten' : 'Neues Produkt') + '</h2>' +
+              '<label class="field"><span>Name</span><input id="pN" value="' + esc(p.name) + '" placeholder="z. B. Stern"></label>' +
+              '<label class="field"><span>Preis (€)</span><input id="pP" inputmode="decimal" value="' + money2(p.price) + '"></label>' +
+              '<div class="field"><span>Symbol</span><div class="emojis">' + emojis.map(e => '<button class="em' + (e === emoji ? ' on' : '') + '" data-e="' + e + '">' + e + '</button>').join('') + '</div></div>' +
+              '<div class="field"><span>Farbe</span><div class="colors">' + COLORS.map(c => '<button class="sw' + (c === color ? ' on' : '') + '" data-c="' + c + '" style="--c:' + c + '"></button>').join('') + '</div></div>' +
+              '<div class="btns">' + (id ? '<button class="btn danger" data-act="del">Löschen</button>' : '<button class="btn ghost" data-act="close">Abbrechen</button>') + '<button class="btn" data-act="save">Speichern</button></div>',
+              b => {
+                if (b.dataset.e) { emoji = b.dataset.e; $$('.em').forEach(x => x.classList.toggle('on', x === b)); }
+                else if (b.dataset.c) { color = b.dataset.c; $$('.sw').forEach(x => x.classList.toggle('on', x === b)); }
+                else if (b.dataset.act === 'close') closeSheet();
+                else if (b.dataset.act === 'del') {
+                  if (!arm(b)) return;
+                  db.products = db.products.filter(x => x.id !== id); delete cart[id];
+                  save(); closeSheet(); renderAll(); toast('Produkt gelöscht');
+                } else if (b.dataset.act === 'save') {
+                  const name = $('#pN').value.trim(), price = parseMoney($('#pP').value);
+                  if (!name) { toast('Bitte Namen eingeben'); return; }
+                  if (isNaN(price) || price < 0) { toast('Bitte gültigen Preis eingeben'); return; }
+                  if (id) Object.assign(p, {name: name, price: price, emoji: emoji, color: color});
+                  else db.products.push({id: uid(), name: name, price: price, emoji: emoji, color: color});
+                  save(); closeSheet(); renderAll(); toast('Gespeichert ✓');
+                }
+              });
+          }
+          function csvText() {
+            const rows = [['Datum', 'Uhrzeit', 'Bon', 'Produkt', 'Menge', 'Einzelpreis', 'Summe', 'Zahlart']];
+            db.sales.slice().sort((a, b) => a.t - b.t).forEach((s, i) => s.items.forEach(it =>
+              rows.push([new Date(s.t).toLocaleDateString('de-DE'), tLabel(s.t), i + 1, it.name, it.qty, money2(it.price), money2(it.price * it.qty), s.pay === 'bar' ? 'Bar' : 'Karte'])));
+            return rows.map(r => r.map(c => { c = String(c); return /[;"\n]/.test(c) ? '"' + c.replace(/"/g, '""') + '"' : c; }).join(';')).join('\n');
+          }
+          function openRestore() {
+            openSheet(() => '<h2>Backup einspielen</h2><div class="muted">Füge den Backup-Text ein. Achtung: Die aktuellen Daten werden ersetzt.</div>' +
+              '<label class="field"><span>Backup-Text</span><textarea id="rIn" placeholder="{&quot;products&quot;: …}"></textarea></label>' +
+              '<div class="btns"><button class="btn ghost" data-act="close">Abbrechen</button><button class="btn" data-act="go">Einspielen</button></div>',
+              b => {
+                if (b.dataset.act === 'close') closeSheet();
+                if (b.dataset.act === 'go') {
+                  let d; try { d = JSON.parse($('#rIn').value); } catch (e) {}
+                  if (!d || !Array.isArray(d.products) || !Array.isArray(d.sales)) { toast('Ungültiges Backup'); return; }
+                  if (!arm(b)) return;
+                  db = Object.assign(fresh(), d); cart = {}; customItems = [];
+                  save(); closeSheet(); renderAll(); toast('Backup eingespielt ✓');
+                }
+              });
+          }
+          $('#settings').addEventListener('click', e => {
+            const b = e.target.closest('button'); if (!b) return;
+            if (b.dataset.edit) return editProduct(b.dataset.edit);
+            switch (b.dataset.act) {
+              case 'addprod': editProduct(null); break;
+              case 'evname': promptSheet('Name des Markts', 'Name', db.eventName, 'text', v => { db.eventName = v.trim() || 'Weihnachtsmarkt'; }); break;
+              case 'setcash': editCash(); break;
+              case 'csv': if (!db.sales.length) toast('Noch keine Verkäufe'); else shareText(csvText(), 'Marktkasse Umsätze'); break;
+              case 'backup': shareText(JSON.stringify(db), 'Marktkasse Backup ' + todayKey()); break;
+              case 'restore': openRestore(); break;
+              case 'reset':
+                if (!arm(b, b.querySelector('.grow'))) return;
+                db.sales = []; save(); renderAll(); toast('Alle Verkäufe gelöscht'); break;
+            }
           });
+
+          /* ---------- Navigation ---------- */
+          const TABS = ['kasse', 'stats', 'history', 'settings'];
+          const TITLES = {kasse: 'Kasse', stats: 'Übersicht', history: 'Verlauf', settings: 'Einstellungen'};
+          let tab = 'kasse';
+          function setTab(t) {
+            tab = t;
+            $$('.view').forEach(v => v.classList.toggle('active', v.id === 'v-' + t));
+            $$('#tabbar button').forEach(b => b.classList.toggle('active', b.dataset.tab === t));
+            $('#lens').style.transform = 'translateX(' + (TABS.indexOf(t) * 100) + '%)';
+            $('#title').textContent = TITLES[t];
+            document.body.dataset.tab = t;
+            renderAll(); window.scrollTo(0, 0);
+          }
+          $('#tabbar').addEventListener('click', e => { const b = e.target.closest('button'); if (b && b.dataset.tab !== tab) { haptic(); setTab(b.dataset.tab); } });
+
+          function renderAll() {
+            $('#evName').textContent = db.eventName;
+            $('#todaySum').textContent = fmt(salesFor('today').reduce((s, x) => s + x.total, 0));
+            renderGrid(); renderCart();
+            if (tab === 'stats') renderStats();
+            if (tab === 'history') renderHistory();
+            if (tab === 'settings') renderSettings();
+          }
+          window.handleBack = function () {
+            if (document.body.classList.contains('sheet-open')) { closeSheet(); return true; }
+            if (tab !== 'kasse') { setTab('kasse'); return true; }
+            return false;
+          };
+          renderAll();
           </script>
           </body>
           </html>
           EOF
 
-      - name: APK bauen
-        run: gradle assembleDebug --no-daemon
+      - name: Fester Signatur-Schlüssel (damit Updates ohne Datenverlust installierbar sind)
+        run: |
+          mkdir -p ~/.android
+          cat << 'EOF' | base64 -d > ~/.android/debug.keystore
+          /u3+7QAAAAIAAAABAAAAAQAPYW5kcm9pZGRlYnVna2V5AAABoh76mLcAAAUBMIIE/TAMBgorBgEE
+          ASoCEQEBBIIE6zug7Me9ta8OEowp1AuJhijVotbCY+QmufKsLUIE0w//JM173Fj6G7hkjewsC32q
+          QBiEzCjq8alDgmNTMV4MIkRkq22WMWBDMaKhVzCentsNHfxdqKV2WNu+r09Q0yW3MHS+GJbzKJ7J
+          FgExw847gsUKe620vH21UsfVpM1bUF4iH65ko++LqMDex25HRgRRNuWk7ZoWQhiTriuq+7AyryCo
+          HbHeQJOWyhtSz1GTpvEPaeTiCNV1zZXJOQUTEBvxV0+0I0k9qF/JwbF0+hyudcpeE/FGc955KYwj
+          YaxB3fetunIAL3vRVkWC2PtdwE8iaB9TlsHclUByK+v3SxAbkXoU6MjZy99y4AcB+zZz6kKyWpIb
+          sxBz2tg1IoggoH0qox8+p9bEuH6U6Atzh/tWva/Go99vIjz+3OwC5Qww6C4gTpv0jyIsgOv++24g
+          oz4uFxcV2DaPnXF+tbvgRYECq3G+u0n6yjrzNfEpDl0G2Y1ALnRuJfmeicwsQWshf/nA2XCMl+Cy
+          ql8Ra1TTCLnKEkDOSYKBfdm/V1SqoIIzq/MF014mWssi9lpTAOxrsvYj4/0ePokMLMpz0ivMvFl6
+          bxZ/8qFHX8j4paqYfrN6qZ3JxvmcyizetNtV3UiLZjhvu2NxiiO1M994fXASIFwfUBLxtOrNnyGL
+          SoZbtTuGXaqo3iRgzzoZcma0G4UUmfNlQcZmdvDsw1d+P88LtxTmJ8yiOCj3Qp85lBUFCSj4FUHv
+          TuFfzLtFzSFUB3ymQjTJuv2z9wl/pv+JtuXyNrXJ/PW91hNAGo7FXvvv+JibDI/KHCaYzQm2NXuX
+          zSnUb2Bxr5Suy8iLn4XtrbNx7h6jV0D1mmzZVIngNfYBD73tJci2CmOHNT6CI/iYhs5a+6390x7H
+          +t7HLcLrdXYv0BhqPd/x/L0/jgXwpGOTFb4TlQbdio8XQ4gkfA3Pxe9Bf51v5y1DPH0kzg30O94Y
+          obDMOcR+KwML/d73PooxoqcLFoHVrmEu106pfGiamji3o+opXJZWtvTgdduRgUQgs92VQa1m5ZZc
+          uVXTkezu2DVq6DK6EIxtMLZNy5cYgFhCiItNX7mBHUrU/tPYCHDVi2ZmVSCCR9pTUBwZt2wi6i1C
+          gRKgsgtD/pwl6a9AQ65s0RoG9ia9T6Tnsatuafnt64ANJhy9dbEjb5yyEWAjtl/xazOGYUWtEfOR
+          YLhSZ8khuyKTAsqA6BXVvMjH05BgDpm5bRFm/m1pga0lk+aWx33s/awULrFPpIUxdOyDGQ6mZoYO
+          aRfVrm9F1XfT2yrq8LFuIU4ufo8FKCkuKOo77ZbUdm0dmrtllZU2Z+tOoSo3mPl8fwVy940lJ62n
+          qa07dBeIjZpeExQKd2kxyqcRTjMKTmPZxIzBoJKsAu084OofNUxYAP2muk2MLTbsnLMfkaqT6/kW
+          pGf9Z0Qyi5OQ+tpOjaJu1Vr+NUvOmq74lvZVQpceX2A80Uvyc8cHOaTLQeMiOparuJF1FdsUpGx9
+          wT7InBKcXlm/NXt6IpQeMRmphh/JIU7Rv2bEYpww7A+/Hg8jZLlu22JAYcNHiv8titMyhj1nAvnH
+          v92mGceVhcHihDAzl8rolwc9sa4Z+A1W6HsGWeQwt62FLeYnn1Wi0nw4C4nCR6S94LgX/3fyM3Gw
+          h/Ot6JYiWz+Ra3VxZcZ2AAAAAQAFWC41MDkAAAMXMIIDEzCCAfugAwIBAgIII7Rq27z0ID4wDQYJ
+          KoZIhvcNAQEMBQAwNzELMAkGA1UEBhMCVVMxEDAOBgNVBAoTB0FuZHJvaWQxFjAUBgNVBAMTDUFu
+          ZHJvaWQgRGVidWcwIBcNMjYxMTI3MjE0NzQ5WhgPMjA1NDA0MTQyMTQ3NDlaMDcxCzAJBgNVBAYT
+          AlVTMRAwDgYDVQQKEwdBbmRyb2lkMRYwFAYDVQQDEw1BbmRyb2lkIERlYnVnMIIBIjANBgkqhkiG
+          9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxcJefLGCAZ3brGLWznRdPrJcP1B9k+h4H8cOB9VBMRRVoDIG
+          Jeh6TVabUxpacK3viFhO30JUmzWpyMnyYRe7uteiE25+56X7/0mzenxWskCFTldtUcs2e3FyOpn1
+          srkGBGpaLCvCz//t+Ttx7sB+jDgObWhYk1vgWOXr1re/b8UsH3tqkdRCbocxoqE2H5Ad7NeVpV58
+          yomzyqF13jal9P+bVFbJgcJt7UDIorINr7JqYjeHU03mYyqwh6wIzwogsS6hVVLCtZhT/R0Ld0Tn
+          NmVUJKhemTtkGreONSdaMvbrnLuizcnEWtYM03uV1C0+gHZtUDN6YgRjDT+8BolHvQIDAQABoyEw
+          HzAdBgNVHQ4EFgQUXGNiEhCdOcfUtkhAToNEefNHHnMwDQYJKoZIhvcNAQEMBQADggEBADG+hXA5
+          T9O586Cac0gc9GcoI8JfqlDvokzIoaRwZZebH4SJnIjFQSP2od+LpyoTa5KFs2X1/c345Ex6cX1i
+          H1KonM+TbTJAaGm4TBcR+hB83mn+yckSxy8OR54i8J/dz5CCHYfBQQNDtu8GkiNVkSTsciMBq/RJ
+          JwU5AUhKbhHSSSuR2b808DrYtdl1WOImweX6P7GY4fA8tgp+isvLxjgM79Lh4s9+lU1VDyWIxLa6
+          GfI+egSnVmAy51mUJww+SSvuTCIqSSKOFfZzQhVKbJau2sMpoSNKvjIi5hw7jcua1jO6Im+UZnin
+          KRri12xgwvIBkY8MO9agXJUvckDMytqbPUrfOcxwxkxZpiXoalntdGk9PQ==
+          EOF
 
-      - uses: actions/upload-artifact@v4
+      - name: APK bauen
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: APK umbenennen
+        run: cp app/build/outputs/apk/debug/app-debug.apk Marktkasse.apk
+
+      - name: APK hochladen
+        uses: actions/upload-artifact@v4
         with:
-          name: ScreenMirror-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: Marktkasse-APK
+          path: Marktkasse.apk

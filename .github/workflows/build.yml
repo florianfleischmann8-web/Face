@@ -17,8 +17,14 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Android SDK (vorinstalliert) vorbereiten
+        run: |
+          SDK="$ANDROID_HOME"; [ -n "$SDK" ] || SDK="$ANDROID_SDK_ROOT"
+          echo "SDK: $SDK"
+          SM="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SM" ]; then SM="$(ls -d $SDK/cmdline-tools/*/bin/sdkmanager | head -n1 || true)"; fi
+          yes | "$SM" --licenses > /dev/null || true
+          "$SM" "platforms;android-34" "build-tools;34.0.0" > /dev/null || true
 
       - name: Gradle
         uses: gradle/actions/setup-gradle@v4
